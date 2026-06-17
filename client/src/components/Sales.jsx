@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   ShoppingCart, 
   Calendar, 
@@ -11,9 +11,15 @@ import {
   Package, 
   AlertTriangle,
   Receipt,
-  User
+  User,
+  Camera,
+  QrCode,
+  Download
 } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { Html5Qrcode } from 'html5-qrcode';
+import { jsPDF } from 'jspdf';
+import { playScanBeep, playSuccessChime, playWarningBeep } from '../utils/sound';
 
 export default function Sales({ socket, user }) {
   const [medicines, setMedicines] = useState([]);
@@ -26,6 +32,13 @@ export default function Sales({ socket, user }) {
   const [saleError, setSaleError] = useState('');
   const [saleSuccess, setSaleSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [lastSaleReceipt, setLastSaleReceipt] = useState(null);
+  
+  // Continuous scanning UX state & refs
+  const [scanToast, setScanToast] = useState('');
+  const lastScanRef = useRef({ barcode: '', time: 0 });
+  const toastTimerRef = useRef(null);
 
   // Fetch medicines and sales logs
   const fetchData = async () => {
@@ -99,6 +112,190 @@ export default function Sales({ socket, user }) {
     }
   });
 
+  // Scanner barcode detection handler
+  const handleBarcodeScanned = (barcode) => {
+    // Play sound beep
+    playScanBeep();
+    
+    // Cooldown check to prevent duplicate scans on subsequent frames
+    const now = Date.now();
+    if (lastScanRef.current.barcode === barcode && now - lastScanRef.current.time < 1500) {
+      return;
+    }
+    lastScanRef.current = { barcode, time: now };
+    
+    // Match by barcode or batch number
+    const matched = medicines.find(med => 
+      (med.barcode && med.barcode.trim() === barcode.trim()) ||
+      med.batch_number.trim() === barcode.trim()
+    );
+
+    if (matched) {
+      setSelectedMedId(prevId => {
+        if (prevId === matched.id.toString()) {
+          // If the item is already selected, increment quantity
+          setQuantity(q => {
+            const nextQty = q + 1;
+            if (nextQty <= matched.quantity) {
+              const msg = `Incremented quantity for ${matched.name} (Qty: ${nextQty})`;
+              setSaleSuccess(msg);
+              if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+              setScanToast(msg);
+              toastTimerRef.current = setTimeout(() => setScanToast(''), 2500);
+              return nextQty;
+            } else {
+              setSaleError(`Cannot increment quantity: maximum stock reached (${matched.quantity} available).`);
+              playWarningBeep();
+              return q;
+            }
+          });
+        } else {
+          // If it's a new item, select it and set quantity to 1
+          setQuantity(1);
+          const msg = `Found and selected: ${matched.name} (Batch: ${matched.batch_number})`;
+          setSaleSuccess(msg);
+          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+          setScanToast(msg);
+          toastTimerRef.current = setTimeout(() => setScanToast(''), 2500);
+        }
+        return matched.id.toString();
+      });
+      setSaleError('');
+    } else {
+      playWarningBeep();
+      const errorMsg = `No medicine found matching barcode/batch: "${barcode}"`;
+      setSaleError(errorMsg);
+      setSaleSuccess('');
+      setLastSaleReceipt(null);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      setScanToast(`❌ ${errorMsg}`);
+      toastTimerRef.current = setTimeout(() => setScanToast(''), 2500);
+    }
+  };
+
+  // Scanner mounting/unmounting hook
+  useEffect(() => {
+    let html5Qrcode = null;
+    if (isScanning) {
+      html5Qrcode = new Html5Qrcode('scanner-view');
+      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      
+      html5Qrcode.start(
+        { facingMode: 'environment' },
+        config,
+        (decodedText) => {
+          handleBarcodeScanned(decodedText);
+        },
+        () => {
+          // Silent scan failure frames
+        }
+      ).catch(err => {
+        console.error('Error starting scanner:', err);
+        setSaleError('Camera access denied or device has no camera.');
+        setIsScanning(false);
+      });
+    }
+    return () => {
+      if (html5Qrcode) {
+        if (html5Qrcode.isScanning) {
+          html5Qrcode.stop().catch(e => console.error('Error stopping scanner:', e));
+        }
+      }
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, [isScanning]);
+
+  // Invoice PDF Generation
+  const handleDownloadInvoice = (receipt) => {
+    if (!receipt) return;
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a6'
+      });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      
+      // Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(15, 23, 42);
+      doc.text('PHARMATRACK RECEIPT', pageWidth / 2, 12, { align: 'center' });
+      
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Intelligent Pharmacy Management', pageWidth / 2, 16, { align: 'center' });
+      
+      // Divider
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.line(8, 20, pageWidth - 8, 20);
+
+      // Sale Details
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(51, 65, 85);
+      doc.text('TRANSACTION RECEIPT', 8, 25);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(`Receipt ID: TXN-${receipt.sale.id || '0000'}`, 8, 30);
+      doc.text(`Date/Time: ${new Date(receipt.saleDate).toLocaleString()}`, 8, 34);
+      doc.text(`Operator: ${user.email}`, 8, 38);
+
+      // Divider
+      doc.line(8, 42, pageWidth - 8, 42);
+
+      // Header Row
+      doc.setFont('helvetica', 'bold');
+      doc.text('Item Description', 8, 47);
+      doc.text('Qty', pageWidth - 26, 47, { align: 'right' });
+      doc.text('Total', pageWidth - 8, 47, { align: 'right' });
+
+      // Divider
+      doc.line(8, 50, pageWidth - 8, 50);
+
+      // Row Data
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${receipt.medicine.name}`, 8, 55);
+      
+      doc.setFontSize(6);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Batch: ${receipt.medicine.batch_number}`, 8, 59);
+      
+      doc.setFontSize(7);
+      doc.setTextColor(51, 65, 85);
+      doc.text(`${receipt.quantity}`, pageWidth - 26, 55, { align: 'right' });
+      doc.text(`$${parseFloat(receipt.totalPrice).toFixed(2)}`, pageWidth - 8, 55, { align: 'right' });
+
+      // Divider
+      doc.line(8, 64, pageWidth - 8, 64);
+
+      // Summary
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text('Total Paid:', 8, 70);
+      doc.setTextColor(14, 165, 233); // sky-500
+      doc.text(`$${parseFloat(receipt.totalPrice).toFixed(2)}`, pageWidth - 8, 70, { align: 'right' });
+
+      // Footer
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(6);
+      doc.setTextColor(148, 163, 184);
+      doc.text('Thank you for choosing PharmaTrack!', pageWidth / 2, 85, { align: 'center' });
+      doc.text('This invoice was dynamically generated client-side.', pageWidth / 2, 88, { align: 'center' });
+
+      doc.save(`receipt-${receipt.sale.id || 'export'}.pdf`);
+    } catch (e) {
+      console.error('Invoice generation failed:', e.message);
+      setSaleError('Invoice PDF compilation failed.');
+    }
+  };
+
   const handleLogSale = async (e) => {
     if (e) e.preventDefault();
     setSaleError('');
@@ -136,7 +333,17 @@ export default function Sales({ socket, user }) {
         throw new Error(errData.error || 'Failed to record sale.');
       }
 
+      const data = await res.json(); // returns { sale, updatedMedicine }
+
       setSaleSuccess(`Successfully sold ${quantity} units of ${selectedMed.name}!`);
+      setLastSaleReceipt({
+        sale: data.sale,
+        medicine: selectedMed,
+        quantity: quantity,
+        totalPrice: totalPrice,
+        saleDate: new Date()
+      });
+      playSuccessChime();
       setSelectedMedId('');
       setQuantity(1);
     } catch (err) {
@@ -223,17 +430,69 @@ export default function Sales({ socket, user }) {
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{filteredMedicines.length} batches ready</span>
             </div>
             
-            <div className="search-input-wrapper" style={{ position: 'relative' }}>
-              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-              <input
-                type="text"
-                className="form-input"
-                style={{ paddingLeft: '38px', fontSize: '0.875rem' }}
-                placeholder="Quick search catalog by name or batch..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
+              <div className="search-input-wrapper" style={{ position: 'relative', flexGrow: 1 }}>
+                <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ paddingLeft: '38px', fontSize: '0.875rem', width: '100%' }}
+                  placeholder="Quick search catalog by name or batch..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  setIsScanning(!isScanning);
+                  setSaleError('');
+                  setSaleSuccess('');
+                  setLastSaleReceipt(null);
+                }}
+                className={`btn ${isScanning ? 'btn-danger' : 'btn-secondary'}`}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', whiteSpace: 'nowrap', padding: '0 1rem' }}
+                title="Scan barcode with camera"
+              >
+                <Camera size={16} />
+                {isScanning ? 'Stop' : 'Scan'}
+              </button>
             </div>
+
+            {isScanning && (
+              <div className="glass-card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', background: 'rgba(15, 23, 42, 0.4)' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <QrCode size={14} style={{ animation: 'pulse 1.5s infinite' }} />
+                  Position barcode/batch number within the camera viewport
+                </div>
+                <div style={{ position: 'relative', width: '100%', maxWidth: '360px' }}>
+                  <div id="scanner-view" style={{ width: '100%', height: '240px', borderRadius: '8px', overflow: 'hidden', background: '#000' }} />
+                  {scanToast && (
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '12px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      background: scanToast.includes('❌') ? 'rgba(239, 68, 68, 0.95)' : 'rgba(16, 185, 129, 0.95)',
+                      color: 'white',
+                      padding: '0.5rem 1rem',
+                      borderRadius: '20px',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                      whiteSpace: 'nowrap',
+                      zIndex: 10,
+                      textAlign: 'center',
+                      pointerEvents: 'none',
+                      transition: 'all 0.3s ease'
+                    }}>
+                      {scanToast}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ 
@@ -262,6 +521,7 @@ export default function Sales({ socket, user }) {
                       setQuantity(1);
                       setSaleError('');
                       setSaleSuccess('');
+                      setLastSaleReceipt(null);
                     }}
                     style={{ 
                       padding: '1rem', 
@@ -319,8 +579,29 @@ export default function Sales({ socket, user }) {
             )}
 
             {saleSuccess && (
-              <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '0.75rem', color: '#a7f3d0', borderRadius: '8px', fontSize: '0.85rem', marginBottom: '1rem' }}>
-                {saleSuccess}
+              <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '0.75rem', color: '#a7f3d0', borderRadius: '8px', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div>{saleSuccess}</div>
+                {lastSaleReceipt && (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadInvoice(lastSaleReceipt)}
+                    className="btn btn-secondary"
+                    style={{ 
+                      width: '100%', 
+                      padding: '0.4rem', 
+                      fontSize: '0.8rem', 
+                      display: 'flex', 
+                      justifyContent: 'center', 
+                      alignItems: 'center', 
+                      gap: '0.35rem',
+                      borderColor: 'rgba(16, 185, 129, 0.4)',
+                      background: 'rgba(16, 185, 129, 0.15)',
+                      color: '#a7f3d0'
+                    }}
+                  >
+                    <Download size={14} /> Download PDF Invoice
+                  </button>
+                )}
               </div>
             )}
 
@@ -398,12 +679,12 @@ export default function Sales({ socket, user }) {
                 <button
                   type="button"
                   onClick={handleLogSale}
-                  disabled={loading}
+                  disabled={loading || !navigator.onLine}
                   className="btn btn-primary"
-                  style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.4rem' }}
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.4rem', opacity: !navigator.onLine ? 0.5 : 1, cursor: !navigator.onLine ? 'not-allowed' : 'pointer' }}
                 >
                   <CheckCircle size={16} />
-                  {loading ? 'Processing...' : 'Complete Sale'}
+                  {!navigator.onLine ? 'Offline Mode (Disabled)' : loading ? 'Processing...' : 'Complete Sale'}
                 </button>
               </div>
             )}

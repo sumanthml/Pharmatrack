@@ -1,6 +1,8 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import dns from 'dns';
 
+dns.setDefaultResultOrder('ipv4first');
 dotenv.config();
 
 const { Pool } = pg;
@@ -18,6 +20,11 @@ pool.query('SELECT NOW()', (err, res) => {
   } else {
     console.log('✅ Supabase DB connected successfully at:', res.rows[0].now);
   }
+});
+
+// Prevent unhandled error events from crashing the Node process
+pool.on('error', (err, client) => {
+  console.error('⚠️ Unexpected idle Supabase DB client error:', err.message);
 });
 
 export default pool;

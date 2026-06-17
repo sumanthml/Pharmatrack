@@ -13,7 +13,7 @@ import {
   User
 } from 'lucide-react';
 
-export default function Sidebar({ activeTab, setActiveTab, alertsCount = 0 }) {
+export default function Sidebar({ activeTab, setActiveTab, alertsCount = 0, branding }) {
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -37,8 +37,16 @@ export default function Sidebar({ activeTab, setActiveTab, alertsCount = 0 }) {
       {/* Desktop Sidebar Layout */}
       <nav className="sidebar">
         <div className="logo-container">
-          <Activity size={24} style={{ color: 'var(--primary)' }} />
-          <span className="logo-text">PharmaTrack</span>
+          {branding?.logo_url ? (
+            <img 
+              src={branding.logo_url} 
+              alt="Logo" 
+              style={{ width: '24px', height: '24px', objectFit: 'contain', borderRadius: '4px' }} 
+            />
+          ) : (
+            <Activity size={24} style={{ color: 'var(--primary)' }} />
+          )}
+          <span className="logo-text">{branding?.name || 'PharmaTrack'}</span>
         </div>
         
         <div className="nav-links">

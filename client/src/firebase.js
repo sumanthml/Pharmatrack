@@ -14,4 +14,26 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+
+// Global Fetch Interceptor to automatically attach Firebase ID Token to all backend API calls
+const originalFetch = window.fetch;
+window.fetch = async (url, options = {}) => {
+  // Only intercept requests directed to backend APIs (e.g. contains '/api/')
+  if (url.includes('/api/') || url.includes('/api')) {
+    try {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const token = await currentUser.getIdToken();
+        options.headers = {
+          ...options.headers,
+          'Authorization': `Bearer ${token}`
+        };
+      }
+    } catch (err) {
+      console.error('Error attaching Firebase auth header:', err.message);
+    }
+  }
+  return originalFetch(url, options);
+};
+
 export default app;

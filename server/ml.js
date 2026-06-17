@@ -6,35 +6,61 @@ import pool from './db.js';
  */
 export async function calculatePredictions(userId) {
   try {
-    // 1. Get medicines filtered by userId if provided
-    const medicinesRes = userId
-      ? await pool.query('SELECT * FROM medicines WHERE user_id = $1 ORDER BY id ASC', [userId])
-      : await pool.query('SELECT * FROM medicines ORDER BY id ASC');
+    let companyId = null;
+    if (userId) {
+      const userRes = await pool.query('SELECT company_id FROM users WHERE id = $1', [userId]);
+      companyId = userRes.rows[0]?.company_id || null;
+    }
+
+    // 1. Get medicines filtered by companyId or userId
+    let medicinesRes;
+    if (companyId) {
+      medicinesRes = await pool.query('SELECT * FROM medicines WHERE company_id = $1 ORDER BY id ASC', [companyId]);
+    } else if (userId) {
+      medicinesRes = await pool.query('SELECT * FROM medicines WHERE user_id = $1 ORDER BY id ASC', [userId]);
+    } else {
+      medicinesRes = await pool.query('SELECT * FROM medicines ORDER BY id ASC');
+    }
     const medicines = medicinesRes.rows;
 
-    // 2. Get sales velocity for each medicine filtered by userId
-    const salesRes = userId
-      ? await pool.query(`
-          SELECT 
-            medicine_id, 
-            SUM(quantity) as total_sold,
-            MIN(sale_date) as first_sale,
-            MAX(sale_date) as last_sale,
-            COUNT(id) as transaction_count
-          FROM sales
-          WHERE user_id = $1
-          GROUP BY medicine_id
-        `, [userId])
-      : await pool.query(`
-          SELECT 
-            medicine_id, 
-            SUM(quantity) as total_sold,
-            MIN(sale_date) as first_sale,
-            MAX(sale_date) as last_sale,
-            COUNT(id) as transaction_count
-          FROM sales
-          GROUP BY medicine_id
-        `);
+    // 2. Get sales velocity for each medicine
+    let salesRes;
+    if (companyId) {
+      salesRes = await pool.query(`
+        SELECT 
+          medicine_id, 
+          SUM(quantity) as total_sold,
+          MIN(sale_date) as first_sale,
+          MAX(sale_date) as last_sale,
+          COUNT(id) as transaction_count
+        FROM sales
+        WHERE company_id = $1
+        GROUP BY medicine_id
+      `, [companyId]);
+    } else if (userId) {
+      salesRes = await pool.query(`
+        SELECT 
+          medicine_id, 
+          SUM(quantity) as total_sold,
+          MIN(sale_date) as first_sale,
+          MAX(sale_date) as last_sale,
+          COUNT(id) as transaction_count
+        FROM sales
+        WHERE user_id = $1
+        GROUP BY medicine_id
+      `, [userId]);
+    } else {
+      salesRes = await pool.query(`
+        SELECT 
+          medicine_id, 
+          SUM(quantity) as total_sold,
+          MIN(sale_date) as first_sale,
+          MAX(sale_date) as last_sale,
+          COUNT(id) as transaction_count
+        FROM sales
+        GROUP BY medicine_id
+      `);
+    }
     
     const salesMap = {};
     salesRes.rows.forEach(row => {

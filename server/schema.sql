@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS medicines (
     supplier_email VARCHAR(255),
     supplier_phone VARCHAR(50),
     purchase_date DATE NOT NULL,
+    barcode VARCHAR(100),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

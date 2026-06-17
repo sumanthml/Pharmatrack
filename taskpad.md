@@ -69,3 +69,14 @@ graph TD
    npm run dev
    ```
    * Access the dashboard at **[http://localhost:5173](http://localhost:5173)** on your phone, tablet, or computer.
+
+---
+
+## 6. Startup Features Checklist (Progressive Status)
+* [ ] **Git Push to GitHub**: Local commit created. (Pending terminal credentials or PAT).
+* [x] **Webcam Barcode Scanner**: Integrate `html5-qrcode` for local camera barcode reading in POS / Inventory.
+* [x] **Client-Side PDF Invoice Generator**: Support PDF receipts upon POS transaction checkout.
+* [x] **Tactile Audio Feedback & Chimes**: Play pleasant audio prompts on scan, sale, and warnings.
+* [x] **Drag-and-Drop Batch Import (CSV)**: Bulk upload medicine data from CSV templates.
+* [x] **PWA & Offline Mode Support**: Configure manifest and caching to support app installation and offline reading.
+

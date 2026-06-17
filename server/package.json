@@ -15,7 +15,8 @@
     "firebase-admin": "^12.1.0",
     "nodemailer": "^9.0.0",
     "pg": "^8.11.5",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

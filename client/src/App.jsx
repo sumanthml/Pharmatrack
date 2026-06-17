@@ -21,6 +21,33 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [socket, setSocket] = useState(null);
   const [alertsCount, setAlertsCount] = useState(0);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [branding, setBranding] = useState({
+    name: 'PharmaTrack',
+    logo_url: '',
+    theme_color: '#0ea5e9'
+  });
+
+  const fetchCompanyBranding = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/companies/settings`);
+      if (res.ok) {
+        const data = await res.json();
+        setBranding({
+          name: data.name || 'PharmaTrack',
+          logo_url: data.logo_url || '',
+          theme_color: data.theme_color || '#0ea5e9'
+        });
+        
+        // Dynamically inject primary color variable
+        const themeColor = data.theme_color || '#0ea5e9';
+        document.documentElement.style.setProperty('--primary', themeColor);
+        document.documentElement.style.setProperty('--primary-glow', `${themeColor}26`);
+      }
+    } catch (err) {
+      console.error('Error fetching company branding:', err.message);
+    }
+  };
 
   const fetchAlertsCount = async () => {
     if (!user) return;
@@ -51,6 +78,19 @@ export default function App() {
   };
 
   useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
     // Monitor Auth State
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
@@ -74,6 +114,7 @@ export default function App() {
 
       // Initial load
       fetchAlertsCount();
+      fetchCompanyBranding();
 
       // Listen to real-time events to update alerts count globally
       newSocket.on('alert', () => {
@@ -103,7 +144,7 @@ export default function App() {
         color: 'white',
         gap: '1rem'
       }}>
-        <Activity size={48} style={{ color: '#0ea5e9', animation: 'spin 2s linear infinite' }} />
+        <Activity size={48} style={{ color: 'var(--primary)', animation: 'spin 2s linear infinite' }} />
         <span style={{ fontSize: '1.1rem', fontWeight: 600, letterSpacing: '0.5px' }}>Loading PharmaTrack...</span>
       </div>
     );
@@ -117,10 +158,31 @@ export default function App() {
   return (
     <div className="app-container">
       {/* Sidebar Navigation */}
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} alertsCount={alertsCount} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} alertsCount={alertsCount} branding={branding} />
 
       {/* Main Layout Area */}
       <main className="main-content">
+        {!isOnline && (
+          <div style={{
+            background: 'linear-gradient(90deg, #ef4444 0%, #dc2626 100%)',
+            color: 'white',
+            padding: '0.6rem 1rem',
+            textAlign: 'center',
+            fontSize: '0.85rem',
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            boxShadow: '0 4px 12px rgba(239, 68, 68, 0.2)',
+            borderRadius: '8px',
+            marginBottom: '1rem'
+          }}>
+            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#fff', animation: 'pulse 1.2s infinite' }} />
+            <strong>OFFLINE MODE:</strong> Serving cached inventory in read-only mode. Checkout transactions and inventory updates are disabled.
+          </div>
+        )}
+
         {/* Glowing Top Alert Bar */}
         {alertsCount > 0 && (
           <div className="top-alert-bar" onClick={() => setActiveTab('alerts')}>
@@ -136,7 +198,7 @@ export default function App() {
         {activeTab === 'predictions' && <Predictions socket={socket} user={user} />}
         {activeTab === 'suppliers' && <Suppliers socket={socket} user={user} />}
         {activeTab === 'alerts' && <Alerts socket={socket} user={user} />}
-        {activeTab === 'profile' && <Profile user={user} />}
+        {activeTab === 'profile' && <Profile user={user} onBrandingUpdate={fetchCompanyBranding} />}
       </main>
 
       {/* Floating AI Assistant Chatbot */}

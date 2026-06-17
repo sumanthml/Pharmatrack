@@ -531,8 +531,10 @@ body {
   position: fixed;
   bottom: 100px;
   right: 24px;
-  width: 380px;
-  height: 500px;
+  width: 460px;
+  height: 640px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 140px);
   z-index: 999;
   display: flex;
   flex-direction: column;
@@ -560,7 +562,7 @@ body {
 }
 
 .chat-bubble {
-  max-width: 80%;
+  max-width: 85%;
   padding: 0.75rem 1rem;
   border-radius: 12px;
   font-size: 0.875rem;
@@ -579,6 +581,43 @@ body {
   color: var(--text-main);
   align-self: flex-start;
   border-bottom-left-radius: 2px;
+}
+
+/* Markdown styling inside chatbot bubbles */
+.chat-bubble .markdown-h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0.6rem 0 0.3rem;
+  color: var(--primary);
+}
+.chat-bubble .markdown-h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0.5rem 0 0.25rem;
+  color: var(--secondary);
+}
+.chat-bubble .markdown-h4 {
+  font-size: 0.925rem;
+  font-weight: 700;
+  margin: 0.4rem 0 0.2rem;
+  color: #38bdf8;
+}
+.chat-bubble .markdown-code {
+  font-family: monospace;
+  background: rgba(2, 6, 23, 0.6);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #38bdf8;
+}
+.chat-bubble .markdown-li {
+  margin-left: 1rem;
+  list-style-type: disc;
+  margin-bottom: 0.25rem;
+}
+.chat-bubble strong {
+  color: #f8fafc;
+  font-weight: 600;
 }
 
 .chat-input-area {

@@ -20,8 +20,14 @@ import {
   CalendarDays,
   Boxes,
   Package,
-  AlertTriangle
+  AlertTriangle,
+  Upload,
+  Download,
+  FileText,
+  Check,
+  ShoppingCart
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { API_BASE_URL } from '../config';
 
 export default function Inventory({ socket, user }) {
@@ -29,19 +35,38 @@ export default function Inventory({ socket, user }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [viewMode, setViewMode] = useState('table'); // table or grid
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
   
   // Suppliers integration
   const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState('custom');
+
+  // CSV Import State
+  const [showImportSection, setShowImportSection] = useState(false);
+  const [importMedsList, setImportMedsList] = useState([]);
+  const [csvError, setCsvError] = useState('');
+  const [csvSuccess, setCsvSuccess] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   
   // Modal State
   const [showModal, setShowModal] = useState(false);
   const [editingMed, setEditingMed] = useState(null);
+
+  // Supplier Reorder PO States
+  const [isReorderModalOpen, setIsReorderModalOpen] = useState(false);
+  const [reorderMed, setReorderMed] = useState(null);
+  const [reorderQty, setReorderQty] = useState(50);
+  const [reorderError, setReorderError] = useState('');
+  const [reorderSuccess, setReorderSuccess] = useState('');
+  const [companySettings, setCompanySettings] = useState(null);
   
   // Form State
   const initialFormState = {
     name: '',
     batch_number: '',
+    barcode: '',
     manufacturing_date: '',
     expiry_date: '',
     quantity: 0,
@@ -54,6 +79,117 @@ export default function Inventory({ socket, user }) {
   };
   const [formData, setFormData] = useState(initialFormState);
   const [formError, setFormError] = useState('');
+
+  // CSV File parser helper
+  const handleCSVFileParse = (file) => {
+    setCsvError('');
+    setCsvSuccess('');
+    setImportMedsList([]);
+
+    if (!file.name.endsWith('.csv')) {
+      setCsvError('Please upload a valid CSV file (.csv).');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        // Standard CSV split by newlines
+        const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+        if (lines.length < 2) {
+          throw new Error('CSV file is empty or missing data rows.');
+        }
+
+        const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
+        const requiredHeaders = ['name', 'batch_number', 'expiry_date', 'quantity', 'price'];
+        
+        // Check if all required headers exist
+        const missing = requiredHeaders.filter(req => !headers.includes(req));
+        if (missing.length > 0) {
+          throw new Error(`Missing required CSV headers: ${missing.join(', ')}`);
+        }
+
+        const parsedList = [];
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+          if (values.length < headers.length) continue;
+
+          const rowData = {};
+          headers.forEach((header, index) => {
+            rowData[header] = values[index];
+          });
+
+          // Validate fields and assign types
+          const qty = parseInt(rowData.quantity) || 0;
+          const priceVal = parseFloat(rowData.price) || 0;
+          const minStock = parseInt(rowData.min_stock_level) || 10;
+          
+          if (!rowData.name || !rowData.batch_number || !rowData.expiry_date) {
+            throw new Error(`Row ${i} has empty required fields (name, batch_number, or expiry_date).`);
+          }
+
+          parsedList.push({
+            name: rowData.name,
+            batch_number: rowData.batch_number,
+            barcode: rowData.barcode || '',
+            manufacturing_date: rowData.manufacturing_date || new Date().toISOString().split('T')[0],
+            expiry_date: rowData.expiry_date,
+            quantity: qty,
+            min_stock_level: minStock,
+            price: priceVal,
+            supplier_name: rowData.supplier_name || '',
+            supplier_email: rowData.supplier_email || '',
+            supplier_phone: rowData.supplier_phone || '',
+            purchase_date: rowData.purchase_date || new Date().toISOString().split('T')[0]
+          });
+        }
+
+        setImportMedsList(parsedList);
+        setCsvSuccess(`Successfully parsed ${parsedList.length} medicine records! Click 'Confirm Import' to save them.`);
+      } catch (err) {
+        setCsvError(`CSV Parsing Error: ${err.message}`);
+      }
+    };
+
+    reader.onerror = () => {
+      setCsvError('Failed to read file.');
+    };
+    
+    reader.readAsText(file);
+  };
+
+  // Confirm CSV bulk import and save to postgresql
+  const handleConfirmBatchImport = async () => {
+    if (importMedsList.length === 0) return;
+    setImporting(true);
+    setCsvError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/medicines/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          medicines: importMedsList,
+          userId: user.uid
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Batch submission failed');
+      }
+
+      setCsvSuccess(`Successfully imported ${importMedsList.length} medicines!`);
+      setImportMedsList([]);
+      setShowImportSection(false);
+      // Refresh inventory list
+      fetchMedicines();
+    } catch (err) {
+      setCsvError(`Import Error: ${err.message}`);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   // Fetch all medicines
   const fetchMedicines = async () => {
@@ -81,9 +217,172 @@ export default function Inventory({ socket, user }) {
     }
   };
 
+  const fetchCompanySettings = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/companies/settings`);
+      if (res.ok) {
+        const data = await res.json();
+        setCompanySettings(data);
+      }
+    } catch (err) {
+      console.error('Error fetching company settings in Inventory:', err.message);
+    }
+  };
+
+  const handleReorderClick = (med) => {
+    setReorderMed(med);
+    const suggested = Math.max(50, med.min_stock_level * 2);
+    setReorderQty(suggested);
+    setIsReorderModalOpen(true);
+    setReorderSuccess('');
+    setReorderError('');
+  };
+
+  const handleSendEmailPO = () => {
+    if (!reorderMed || !reorderMed.supplier_email) return;
+    try {
+      const companyName = companySettings?.name || user.email.split('@')[0] + ' Pharmacy';
+      const subject = encodeURIComponent(`Purchase Order request: ${reorderMed.name} (Batch: ${reorderMed.batch_number})`);
+      const body = encodeURIComponent(
+        `Dear ${reorderMed.supplier_name || 'Supplier'},\n\n` +
+        `This is a purchase order from ${companyName}.\n\n` +
+        `Please arrange restock of the following medicine:\n` +
+        `- Medicine Name: ${reorderMed.name}\n` +
+        `- Batch Number: ${reorderMed.batch_number}\n` +
+        `- Quantity Requested: ${reorderQty} units\n` +
+        `- Unit Price agreed: $${parseFloat(reorderMed.price).toFixed(2)}\n` +
+        `- Total Estimated Cost: $${(reorderQty * parseFloat(reorderMed.price)).toFixed(2)}\n\n` +
+        `Please send us the delivery details and invoice at your earliest convenience.\n\n` +
+        `Best regards,\n` +
+        `${user.email}\n` +
+        `${companyName}`
+      );
+      window.location.href = `mailto:${reorderMed.supplier_email}?subject=${subject}&body=${body}`;
+      setReorderSuccess('Email client opened successfully!');
+      
+      // Log audit trail
+      fetch(`${API_BASE_URL}/api/audit-logs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actionType: 'PO_EMAIL_GENERATE',
+          userId: user.uid
+        })
+      }).catch(e => console.error(e));
+    } catch (err) {
+      setReorderError('Failed to open email client: ' + err.message);
+    }
+  };
+
+  const handleDownloadPDFPO = () => {
+    if (!reorderMed) return;
+    try {
+      const companyName = companySettings?.name || 'PharmaTrack Workspace';
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const primaryColor = companySettings?.theme_color || '#0ea5e9';
+      
+      // Draw branded header strip
+      doc.setFillColor(primaryColor);
+      doc.rect(0, 0, 210, 15, 'F');
+
+      // Title
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('PURCHASE ORDER', 15, 10);
+
+      // Workspace / Sender Details
+      doc.setTextColor(51, 65, 85);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`From:\n${companyName}\nEmail: ${user.email}`, 15, 25);
+
+      // Supplier Details
+      doc.text(
+        `To:\n${reorderMed.supplier_name || 'N/A'}\nEmail: ${reorderMed.supplier_email || 'N/A'}\nPhone: ${reorderMed.supplier_phone || 'N/A'}`,
+        120, 25
+      );
+
+      // Divider Line
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.5);
+      doc.line(15, 50, 195, 50);
+
+      // PO Metadata
+      doc.setFont('helvetica', 'bold');
+      doc.text('Purchase Order Details', 15, 58);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text(`PO Number: PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`, 15, 64);
+      doc.text(`Date Issued: ${new Date().toLocaleDateString()}`, 15, 69);
+      doc.text(`Status: Pending Approval`, 15, 74);
+
+      // Table Header
+      doc.setFillColor(248, 250, 252);
+      doc.rect(15, 83, 180, 8, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.text('Item Description', 18, 88);
+      doc.text('Batch', 90, 88);
+      doc.text('Qty', 135, 88, { align: 'right' });
+      doc.text('Unit Price', 165, 88, { align: 'right' });
+      doc.text('Total', 190, 88, { align: 'right' });
+
+      // Table Row
+      doc.setFont('helvetica', 'normal');
+      doc.text(reorderMed.name, 18, 98);
+      doc.text(reorderMed.batch_number, 90, 98);
+      doc.text(reorderQty.toString(), 135, 98, { align: 'right' });
+      doc.text(`$${parseFloat(reorderMed.price).toFixed(2)}`, 165, 98, { align: 'right' });
+      
+      const totalPrice = (reorderQty * parseFloat(reorderMed.price)).toFixed(2);
+      doc.text(`$${totalPrice}`, 190, 98, { align: 'right' });
+
+      // Line
+      doc.line(15, 104, 195, 104);
+
+      // Summary
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Total PO Value:', 120, 114);
+      doc.text(`$${totalPrice}`, 190, 114, { align: 'right' });
+
+      // Footer
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text('PharmaTrack Automated White-Label Purchase Order.', 105, 275, { align: 'center' });
+
+      doc.save(`po-${reorderMed.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}.pdf`);
+      setReorderSuccess('PO PDF downloaded successfully!');
+
+      // Log audit trail
+      fetch(`${API_BASE_URL}/api/audit-logs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actionType: 'PO_PDF_GENERATE',
+          userId: user.uid
+        })
+      }).catch(e => console.error(e));
+    } catch (err) {
+      setReorderError('Failed to generate PO PDF: ' + err.message);
+    }
+  };
+
+  // Reset page when search or filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
   useEffect(() => {
     fetchMedicines();
     fetchSuppliers();
+    fetchCompanySettings();
 
     // Listen to real-time updates from Socket.io
     if (socket) {
@@ -310,6 +609,12 @@ export default function Inventory({ socket, user }) {
     return matchesSearch && matchesStatus;
   });
 
+  const totalPages = Math.ceil(filteredMedicines.length / itemsPerPage);
+  const paginatedMedicines = filteredMedicines.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   return (
     <div className="inventory-container">
       <div className="page-header">
@@ -317,11 +622,164 @@ export default function Inventory({ socket, user }) {
           <h1>Medicine Inventory</h1>
           <p>Manage medicine batches, stock levels, and supplier profiles</p>
         </div>
-        <button onClick={handleAddClick} className="btn btn-primary">
-          <Plus size={18} />
-          Add Medicine
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button 
+            onClick={() => {
+              if (!navigator.onLine) return;
+              setShowImportSection(!showImportSection);
+              setCsvError('');
+              setCsvSuccess('');
+              setImportMedsList([]);
+            }} 
+            disabled={!navigator.onLine}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', opacity: !navigator.onLine ? 0.5 : 1, cursor: !navigator.onLine ? 'not-allowed' : 'pointer' }}
+          >
+            <Upload size={16} />
+            Import CSV
+          </button>
+          <button 
+            onClick={() => {
+              if (!navigator.onLine) return;
+              handleAddClick();
+            }} 
+            disabled={!navigator.onLine}
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', opacity: !navigator.onLine ? 0.5 : 1, cursor: !navigator.onLine ? 'not-allowed' : 'pointer' }}
+          >
+            <Plus size={18} />
+            Add Medicine
+          </button>
+        </div>
       </div>
+
+      {/* CSV Import Overlay Box */}
+      {showImportSection && (
+        <div 
+          className="glass-card" 
+          style={{ 
+            padding: '1.5rem', 
+            marginBottom: '1.5rem',
+            border: isDragOver ? '2px dashed var(--primary)' : '2px dashed rgba(255,255,255,0.15)',
+            background: isDragOver ? 'rgba(14,165,233,0.05)' : 'rgba(255,255,255,0.01)',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            alignItems: 'center',
+            textAlign: 'center'
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDragOver(true);
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragOver(false);
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+              handleCSVFileParse(e.dataTransfer.files[0]);
+            }
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+            <FileText size={40} style={{ color: isDragOver ? 'var(--primary)' : 'var(--text-muted)', marginBottom: '0.25rem' }} />
+            <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Bulk Import Medicine Batches</h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', maxWidth: '400px' }}>
+              Drag and drop your medicines CSV template file here, or click to upload.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
+            <input 
+              type="file" 
+              accept=".csv" 
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleCSVFileParse(e.target.files[0]);
+                }
+              }}
+              style={{ display: 'none' }}
+              id="csv-file-input"
+            />
+            <label htmlFor="csv-file-input" className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.8rem', cursor: 'pointer' }}>
+              Browse Files
+            </label>
+
+            {/* Template download link */}
+            <a 
+              href="data:text/csv;charset=utf-8,name,batch_number,barcode,expiry_date,quantity,price,min_stock_level,manufacturing_date,supplier_name,supplier_email%0AAmoxicillin%20250mg,AMX002,1234567890,2027-12-31,100,4.50,15,2025-12-01,AlphaDistributors,alpha@dist.com" 
+              download="pharmatrack_import_template.csv"
+              style={{ fontSize: '0.75rem', color: 'var(--primary)', textDecoration: 'underline', marginTop: '0.25rem' }}
+            >
+              Download CSV Import Template
+            </a>
+          </div>
+
+          {csvError && (
+            <div style={{ fontSize: '0.85rem', color: '#f87171', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '0.5rem 1rem', borderRadius: '6px' }}>
+              {csvError}
+            </div>
+          )}
+
+          {csvSuccess && (
+            <div style={{ fontSize: '0.85rem', color: '#34d399', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '0.5rem 1rem', borderRadius: '6px' }}>
+              {csvSuccess}
+            </div>
+          )}
+
+          {importMedsList.length > 0 && (
+            <div style={{ width: '100%', maxWidth: '600px', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '6px', textAlign: 'left', background: 'rgba(0,0,0,0.2)' }}>
+                <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <th style={{ padding: '0.4rem 0.6rem' }}>Medicine</th>
+                      <th style={{ padding: '0.4rem 0.6rem' }}>Batch</th>
+                      <th style={{ padding: '0.4rem 0.6rem' }}>Qty</th>
+                      <th style={{ padding: '0.4rem 0.6rem' }}>Price</th>
+                      <th style={{ padding: '0.4rem 0.6rem' }}>Expiry</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importMedsList.map((m, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>{m.name}</td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>{m.batch_number}</td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>{m.quantity}</td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>${m.price.toFixed(2)}</td>
+                        <td style={{ padding: '0.4rem 0.6rem' }}>{m.expiry_date}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                <button 
+                  onClick={handleConfirmBatchImport} 
+                  disabled={importing} 
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 1rem', fontSize: '0.8rem' }}
+                >
+                  <Check size={14} />
+                  {importing ? 'Importing...' : 'Confirm Import'}
+                </button>
+                <button 
+                  onClick={() => {
+                    setImportMedsList([]);
+                    setCsvSuccess('');
+                  }} 
+                  className="btn btn-secondary"
+                  style={{ padding: '0.4rem 1rem', fontSize: '0.8rem' }}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Mindful Inventory Dashboard Banner */}
       <div className="stats-grid" style={{ marginBottom: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
@@ -476,7 +934,7 @@ export default function Inventory({ socket, user }) {
               </tr>
             </thead>
             <tbody>
-              {filteredMedicines.map(med => {
+              {paginatedMedicines.map(med => {
                 const status = getMedicineStatus(med);
                 let badgeClass = 'success';
                 let badgeText = 'Normal';
@@ -519,15 +977,16 @@ export default function Inventory({ socket, user }) {
                         <div style={{ display: 'inline-flex', gap: '0.25rem', marginLeft: '0.5rem' }}>
                           <button 
                             onClick={() => handleQuickStockAdjust(med, -10)} 
-                            disabled={med.quantity === 0}
-                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: med.quantity === 0 ? 'var(--text-muted)' : 'var(--text-main)', borderRadius: '4px', padding: '0.15rem 0.35rem', cursor: med.quantity === 0 ? 'default' : 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
+                            disabled={med.quantity === 0 || !navigator.onLine}
+                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: (med.quantity === 0 || !navigator.onLine) ? 'var(--text-muted)' : 'var(--text-main)', borderRadius: '4px', padding: '0.15rem 0.35rem', cursor: (med.quantity === 0 || !navigator.onLine) ? 'default' : 'pointer', fontSize: '0.75rem', fontWeight: 600, opacity: !navigator.onLine ? 0.5 : 1 }}
                             title="Reduce stock by 10"
                           >
                             -10
                           </button>
                           <button 
                             onClick={() => handleQuickStockAdjust(med, 10)} 
-                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-main)', borderRadius: '4px', padding: '0.15rem 0.35rem', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
+                            disabled={!navigator.onLine}
+                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: !navigator.onLine ? 'var(--text-muted)' : 'var(--text-main)', borderRadius: '4px', padding: '0.15rem 0.35rem', cursor: !navigator.onLine ? 'default' : 'pointer', fontSize: '0.75rem', fontWeight: 600, opacity: !navigator.onLine ? 0.5 : 1 }}
                             title="Refill stock by 10"
                           >
                             +10
@@ -549,6 +1008,16 @@ export default function Inventory({ socket, user }) {
                     </td>
                     <td data-label="Actions" style={{ textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
+                        {(status === 'low_stock' || status === 'out_of_stock') && (
+                          <button 
+                            onClick={() => handleReorderClick(med)} 
+                            className="btn btn-primary" 
+                            style={{ padding: '0.4rem', background: 'rgba(14,165,233,0.15)', color: 'var(--primary)' }}
+                            title="Generate Reorder PO"
+                          >
+                            <ShoppingCart size={14} />
+                          </button>
+                        )}
                         <button onClick={() => handleEditClick(med)} className="btn btn-secondary" style={{ padding: '0.4rem' }}>
                           <Edit2 size={14} />
                         </button>
@@ -566,7 +1035,7 @@ export default function Inventory({ socket, user }) {
       ) : (
         /* Tactile Grid Layout View */
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
-          {filteredMedicines.map(med => {
+          {paginatedMedicines.map(med => {
             const status = getMedicineStatus(med);
             let badgeClass = 'success';
             let badgeText = 'Normal';
@@ -594,6 +1063,11 @@ export default function Inventory({ socket, user }) {
                 
                 {/* Actions overlay */}
                 <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '0.4rem' }}>
+                  {(status === 'low_stock' || status === 'out_of_stock') && (
+                    <button onClick={() => handleReorderClick(med)} style={{ background: 'rgba(14,165,233,0.1)', border: 'none', padding: '0.35rem', borderRadius: '6px', color: 'var(--primary)', cursor: 'pointer' }} title="Generate Reorder PO">
+                      <ShoppingCart size={12} />
+                    </button>
+                  )}
                   <button onClick={() => handleEditClick(med)} style={{ background: 'rgba(255,255,255,0.04)', border: 'none', padding: '0.35rem', borderRadius: '6px', color: 'var(--primary)', cursor: 'pointer' }}>
                     <Edit2 size={12} />
                   </button>
@@ -659,16 +1133,17 @@ export default function Inventory({ socket, user }) {
                   <div style={{ display: 'flex', gap: '0.4rem' }}>
                     <button 
                       onClick={() => handleQuickStockAdjust(med, -10)} 
-                      disabled={med.quantity === 0}
+                      disabled={med.quantity === 0 || !navigator.onLine}
                       className="btn btn-secondary"
-                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}
+                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem', opacity: !navigator.onLine ? 0.5 : 1, cursor: !navigator.onLine ? 'not-allowed' : 'pointer' }}
                     >
                       <MinusCircle size={12} /> -10
                     </button>
                     <button 
                       onClick={() => handleQuickStockAdjust(med, 10)} 
+                      disabled={!navigator.onLine}
                       className="btn btn-secondary"
-                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem' }}
+                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.2rem', opacity: !navigator.onLine ? 0.5 : 1, cursor: !navigator.onLine ? 'not-allowed' : 'pointer' }}
                     >
                       <PlusCircle size={12} /> +10
                     </button>
@@ -686,6 +1161,31 @@ export default function Inventory({ socket, user }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1.5rem', padding: '1rem 0' }}>
+          <button 
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            disabled={currentPage === 1}
+            className="btn btn-secondary"
+            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+          >
+            Previous
+          </button>
+          <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            Page <strong>{currentPage}</strong> of {totalPages} ({filteredMedicines.length} items)
+          </span>
+          <button 
+            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            disabled={currentPage === totalPages}
+            className="btn btn-secondary"
+            style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+          >
+            Next
+          </button>
         </div>
       )}
 
@@ -731,6 +1231,17 @@ export default function Inventory({ socket, user }) {
                     placeholder="e.g. B101"
                     value={formData.batch_number}
                     onChange={(e) => setFormData({ ...formData, batch_number: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Barcode (UPC/EAN/Code39)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. 501234567890"
+                    value={formData.barcode || ''}
+                    onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
                   />
                 </div>
 
@@ -869,6 +1380,107 @@ export default function Inventory({ socket, user }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Supplier Reorder Purchase Order Modal */}
+      {isReorderModalOpen && reorderMed && (
+        <div className="modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="glass-card modal-content" style={{ maxWidth: '500px', width: '100%', padding: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ShoppingCart size={20} style={{ color: 'var(--primary)' }} />
+                <h3 style={{ margin: 0, fontWeight: 700, fontSize: '1.2rem' }}>Generate Purchase Order</h3>
+              </div>
+              <button 
+                onClick={() => { setIsReorderModalOpen(false); setReorderMed(null); setReorderSuccess(''); setReorderError(''); }} 
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {reorderSuccess && (
+              <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '8px', padding: '0.6rem 0.8rem', color: '#a7f3d0', fontSize: '0.85rem', marginBottom: '1rem', textAlign: 'center' }}>
+                {reorderSuccess}
+              </div>
+            )}
+            {reorderError && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', padding: '0.6rem 0.8rem', color: '#fca5a5', fontSize: '0.85rem', marginBottom: '1rem', textAlign: 'center' }}>
+                {reorderError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div style={{ display: 'flex', gap: '1rem', background: 'rgba(2, 6, 23, 0.2)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: '8px', padding: '0.75rem' }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Medicine Name</span>
+                  <div style={{ fontWeight: 700, fontSize: '1rem' }}>{reorderMed.name}</div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Batch: {reorderMed.batch_number}</span>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Current Stock</span>
+                  <div style={{ fontWeight: 700, fontSize: '1rem', color: reorderMed.quantity === 0 ? 'var(--danger)' : 'var(--secondary)' }}>{reorderMed.quantity} units</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'rgba(2, 6, 23, 0.2)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: '8px', padding: '0.75rem' }}>
+                <div style={{ fontWeight: 600, fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Supplier Information</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{reorderMed.supplier_name || 'No Supplier Linked'}</div>
+                {reorderMed.supplier_email && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    <Mail size={12} /> {reorderMed.supplier_email}
+                  </div>
+                )}
+                {reorderMed.supplier_phone && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    <Phone size={12} /> {reorderMed.supplier_phone}
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label style={{ fontSize: '0.8rem', marginBottom: '0.3rem', display: 'block' }}>Order Quantity *</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  className="form-input" 
+                  style={{ fontSize: '0.9rem' }} 
+                  value={reorderQty} 
+                  onChange={(e) => setReorderQty(Math.max(1, parseInt(e.target.value) || 1))} 
+                />
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                  Estimated Cost: <strong style={{ color: 'var(--secondary)' }}>${(reorderQty * parseFloat(reorderMed.price)).toFixed(2)}</strong> (${parseFloat(reorderMed.price).toFixed(2)} / unit)
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button 
+                type="button" 
+                onClick={() => { setIsReorderModalOpen(false); setReorderMed(null); setReorderSuccess(''); setReorderError(''); }} 
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleSendEmailPO} 
+                disabled={!reorderMed.supplier_email}
+                className="btn btn-primary"
+                style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.2)' }}
+              >
+                <Mail size={14} style={{ marginRight: '0.25rem' }} /> Email PO
+              </button>
+              <button 
+                type="button" 
+                onClick={handleDownloadPDFPO} 
+                className="btn btn-primary"
+              >
+                <FileText size={14} style={{ marginRight: '0.25rem' }} /> PDF PO
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -7,7 +7,9 @@ import {
   Sparkles, 
   AlertOctagon, 
   CheckCircle2, 
-  Clock 
+  Clock,
+  Users,
+  Download
 } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 import { Line, Bar } from 'react-chartjs-2';
@@ -45,7 +47,11 @@ export default function Dashboard({ socket, onAlert, user }) {
     lowStock: 0,
     expired: 0,
     topSelling: [],
-    timeline: []
+    timeline: [],
+    isCompanyScoped: false,
+    userRole: 'employee',
+    activePersonnel: 0,
+    salesByEmployee: []
   });
   const [alerts, setAlerts] = useState([]);
   const [loadingStats, setLoadingStats] = useState(true);
@@ -147,10 +153,29 @@ export default function Dashboard({ socket, onAlert, user }) {
 
   return (
     <div className="dashboard-container">
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div className="page-title">
           <h1>Dashboard Overview</h1>
           <p>Real-time analytics and intelligent recommendation panels</p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button 
+            onClick={() => window.open(`${API_BASE_URL}/api/reports/employee/export?userId=${user.uid}`, '_blank')} 
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+          >
+            <Download size={14} /> Export Personal Sales
+          </button>
+          
+          {stats.isCompanyScoped && (stats.userRole === 'admin' || stats.userRole === 'manager') && (
+            <button 
+              onClick={() => window.open(`${API_BASE_URL}/api/reports/company/export?userId=${user.uid}`, '_blank')} 
+              className="btn btn-primary"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+            >
+              <Download size={14} /> Export Company Excel
+            </button>
+          )}
         </div>
       </div>
 
@@ -201,6 +226,18 @@ export default function Dashboard({ socket, onAlert, user }) {
             <AlertOctagon size={24} />
           </div>
         </div>
+
+        {stats.isCompanyScoped && (
+          <div className="glass-card stat-card">
+            <div className="stat-info">
+              <h3>Active Staff</h3>
+              <div className="stat-value" style={{ color: 'var(--secondary)' }}>{stats.activePersonnel}</div>
+            </div>
+            <div className="stat-icon secondary" style={{ background: 'rgba(14,165,233,0.15)', color: 'var(--secondary)' }}>
+              <Users size={24} />
+            </div>
+          </div>
+        )}
       </div>
 
 
@@ -243,6 +280,57 @@ export default function Dashboard({ socket, onAlert, user }) {
           </div>
         </div>
       </div>
+
+      {/* Employee Sales Contributions (only for company scoped workspaces) */}
+      {stats.isCompanyScoped && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem', marginTop: '1.5rem' }}>
+          <div className="glass-card" style={{ padding: '2rem' }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.75rem' }}>
+              <Users size={20} style={{ color: 'var(--secondary)' }} />
+              Staff Performance & Sales Contributions
+            </h2>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Staff Member</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Role</th>
+                    <th style={{ padding: '0.75rem 0.5rem', textAlign: 'center' }}>Total Sales Transactions</th>
+                    <th style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>Revenue Generated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.salesByEmployee.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        No staff sales logged yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    stats.salesByEmployee.map((emp, index) => (
+                      <tr key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                        <td style={{ padding: '0.75rem 0.5rem' }}>
+                          <strong>{emp.name || 'Workspace Staff'}</strong>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{emp.email}</div>
+                        </td>
+                        <td style={{ padding: '0.75rem 0.5rem' }}>
+                          <span className={`badge ${emp.role === 'admin' ? 'danger' : emp.role === 'manager' ? 'warning' : 'success'}`}>
+                            {emp.role.toUpperCase()}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center' }}>{emp.sales_count}</td>
+                        <td style={{ padding: '0.75rem 0.5rem', textAlign: 'right', fontWeight: 600, color: 'var(--primary)' }}>
+                          ${parseFloat(emp.revenue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

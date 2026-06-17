@@ -2,6 +2,53 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquareCode, Send, X, Bot, User, BrainCircuit } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 
+const parseMarkdown = (text) => {
+  if (!text) return '';
+  
+  // Escape HTML to prevent XSS
+  let escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Process line-by-line for headers and lists
+  const lines = escaped.split('\n');
+  const processedLines = lines.map(line => {
+    const trimmed = line.trim();
+    // Headers
+    if (trimmed.startsWith('### ')) {
+      return `<h4 class="markdown-h4">${trimmed.slice(4)}</h4>`;
+    }
+    if (trimmed.startsWith('## ')) {
+      return `<h3 class="markdown-h3">${trimmed.slice(3)}</h3>`;
+    }
+    if (trimmed.startsWith('# ')) {
+      return `<h2 class="markdown-h2">${trimmed.slice(2)}</h2>`;
+    }
+    // Bullet list items
+    if (trimmed.startsWith('- ')) {
+      return `<li class="markdown-li">${trimmed.slice(2)}</li>`;
+    }
+    if (trimmed.startsWith('* ')) {
+      return `<li class="markdown-li">${trimmed.slice(2)}</li>`;
+    }
+    return line;
+  });
+
+  let html = processedLines.join('\n');
+
+  // Bold tags: **bold**
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Code tags: `code`
+  html = html.replace(/`(.*?)`/g, '<code class="markdown-code">$1</code>');
+
+  // Replace newlines with breaks
+  html = html.replace(/\n/g, '<br />');
+
+  return html;
+};
+
 export default function AIChat({ user }) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
@@ -120,7 +167,7 @@ export default function AIChat({ user }) {
                   {msg.sender === 'user' ? <User size={10} /> : <Bot size={10} />}
                   <span>{msg.sender === 'user' ? 'You' : 'PharmaBot'}</span>
                 </div>
-                <div style={{ whiteSpace: 'pre-line' }}>{msg.text}</div>
+                <div dangerouslySetInnerHTML={{ __html: parseMarkdown(msg.text) }} />
               </div>
             ))}
             

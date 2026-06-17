@@ -7,7 +7,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 /**
  * Call the Groq Chat Completions API.
  */
-async function callGroq(prompt, systemPrompt = '') {
+async function callGroq(prompt, systemPrompt = '', model = 'llama-3.3-70b-versatile') {
   try {
     if (!GROQ_API_KEY) {
       throw new Error('Groq API key is not configured.');
@@ -26,7 +26,7 @@ async function callGroq(prompt, systemPrompt = '') {
         'Authorization': `Bearer ${GROQ_API_KEY}`
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: model,
         messages: messages,
         temperature: 0.2,
         max_tokens: 1024
@@ -37,8 +37,8 @@ async function callGroq(prompt, systemPrompt = '') {
       const errorText = await response.text();
       console.error('Groq API Primary Model Error:', errorText, 'status:', response.status);
       
-      // Fallback model if primary model is rate limited or unavailable
-      console.log('🔄 Attempting fallback model: llama-3.1-8b-instant...');
+      const fallbackModel = model === 'llama-3.1-8b-instant' ? 'llama-3.3-70b-versatile' : 'llama-3.1-8b-instant';
+      console.log(`🔄 Attempting fallback model: ${fallbackModel}...`);
       const fallbackResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -46,7 +46,7 @@ async function callGroq(prompt, systemPrompt = '') {
           'Authorization': `Bearer ${GROQ_API_KEY}`
         },
         body: JSON.stringify({
-          model: 'llama-3.1-8b-instant',
+          model: fallbackModel,
           messages: messages,
           temperature: 0.2,
           max_tokens: 1024
@@ -137,7 +137,15 @@ export async function chatWithPharmacist(history, userQuery, inventorySummary, p
   const prompt = `
 You are "PharmaBot", the intelligent virtual pharmacist and inventory auditor for PharmaTrack.
 You have direct, real-time access to the pharmacy's database and ML prediction metrics.
-Respond in a helpful, professional, and concise manner. Use bullet points or short paragraphs where appropriate.
+
+Please structure your response beautifully with:
+- A friendly, creative greeting or opening line (using relevant emojis like 💊, 📊, ⚡).
+- Highly structured details using clear bullet points.
+- Creative business tips or recommendations (e.g. marketing bundles, stock repositioning, supplier negotiations).
+- Bold text for critical numbers, medicine names, and actionable dates.
+- Clean markdown headings (e.g. ### Action Plan) to separate ideas.
+
+Keep it concise and punchy to read. Avoid long paragraphs.
 
 ---
 REAL-TIME PHARMACY DATABASE CONTEXT:
@@ -159,7 +167,11 @@ Provide your response to the Pharmacist:
 `;
 
   try {
-    const response = await callGroq(prompt, "You are a helpful pharmacist AI assistant named PharmaBot. You are knowledgeable, precise, and polite. Always format your responses using clean markdown.");
+    const response = await callGroq(
+      prompt, 
+      "You are a helpful pharmacist AI assistant named PharmaBot. You are knowledgeable, precise, polite, and creative. Always structure your responses using markdown headers (e.g. ### Recommendation), bullet lists, bold text, and emojis.",
+      'llama-3.1-8b-instant'
+    );
     return response;
   } catch (err) {
     console.error('Failed to get Groq chatbot response:', err.message);
