@@ -3,6 +3,7 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'fire
 import { auth } from '../firebase';
 import { Shield, Mail, Lock, Activity, Building, User, Phone, Key, CheckCircle, Smartphone } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { playScanBeep, playSuccessChime, playWarningBeep } from '../utils/sound';
 
 export default function Login({ onAuthSuccess }) {
   const [authType, setAuthType] = useState('signin'); // 'signin', 'employee', 'company'
@@ -61,6 +62,9 @@ export default function Login({ onAuthSuccess }) {
 
       const data = await res.json();
       
+      // Play audio cue
+      playScanBeep();
+
       // Simulate slide-down browser notification banner for testing
       setSmsNotification({ phone: targetEmail, code: data.code });
       setSmsActive(true);
@@ -69,6 +73,7 @@ export default function Login({ onAuthSuccess }) {
         setTimeout(() => setSmsNotification(null), 400);
       }, 10000);
     } catch (err) {
+      playWarningBeep();
       setOtpError(err.message);
     } finally {
       setOtpLoading(false);
@@ -98,11 +103,15 @@ export default function Login({ onAuthSuccess }) {
       setSmsActive(false);
       setSmsNotification(null);
 
+      // Play success audio chime
+      playSuccessChime();
+
       // Execute the pending registration form submit
       if (pendingFormSubmit) {
         pendingFormSubmit();
       }
     } catch (err) {
+      playWarningBeep();
       setOtpError(err.message);
       setOtpLoading(false);
     }
@@ -129,6 +138,9 @@ export default function Login({ onAuthSuccess }) {
 
       const data = await res.json();
       
+      // Play audio cue
+      playScanBeep();
+
       setSmsNotification({ phone: otpTargetMobile, code: data.code });
       setSmsActive(true);
       setTimeout(() => {
@@ -136,6 +148,7 @@ export default function Login({ onAuthSuccess }) {
         setTimeout(() => setSmsNotification(null), 400);
       }, 10000);
     } catch (err) {
+      playWarningBeep();
       setOtpError(err.message);
     } finally {
       setOtpLoading(false);
