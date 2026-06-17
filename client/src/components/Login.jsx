@@ -191,8 +191,8 @@ export default function Login({ onAuthSuccess }) {
           id: user.uid,
           email: user.email,
           company_name: companyName,
-          company_phone: companyPhone,
-          admin_mobile: adminMobile
+          company_phone: null,
+          admin_mobile: null
         })
       });
 
@@ -245,7 +245,7 @@ export default function Login({ onAuthSuccess }) {
           id: user.uid,
           email: user.email,
           name: employeeName,
-          mobile_number: employeeMobile,
+          mobile_number: null,
           company_id,
           role: employeeRole
         })
