@@ -1,58 +1,79 @@
-import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-let testAccount = null;
-let cachedTransporter = null;
-const fromEmail = process.env.SMTP_USER || 'noreply@pharmatrack.com';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || 're_7uCsugqK_BUSWKY7qZhdaccxKU9VSs3ED';
 
 /**
- * Resolves the Nodemailer transporter (SMTP or Ethereal test account).
+ * Send an email via the Resend HTTP API.
  */
-async function getTransporter() {
-  if (cachedTransporter) return cachedTransporter;
+async function sendMailViaResend(recipientEmail, subject, html) {
+  try {
+    if (!RESEND_API_KEY) {
+      console.error('❌ Resend API key is not configured.');
+      return { success: false };
+    }
 
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    cachedTransporter = nodemailer.createTransport({
-      pool: true,
-      maxConnections: 5,
-      maxMessages: 100,
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_PORT === '465',
-      connectionTimeout: 5000,
-      greetingTimeout: 5000,
-      socketTimeout: 5000,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
+    const payload = {
+      from: 'PharmaTrack <onboarding@resend.dev>',
+      to: recipientEmail,
+      subject: subject,
+      html: html
+    };
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
     });
-    return cachedTransporter;
-  }
 
-  // Fallback: Create dynamic ethereal account for instant developer testing
-  if (!testAccount) {
-    try {
-      testAccount = await nodemailer.createTestAccount();
-      console.log(`✉️ Dynamic Ethereal Email Account created: User=${testAccount.user}`);
-    } catch (err) {
-      console.error('Failed to create Ethereal test account, using fake logger.', err.message);
-      return null;
-    }
-  }
+    const data = await response.json();
 
-  cachedTransporter = nodemailer.createTransport({
-    host: 'smtp.ethereal.email',
-    port: 587,
-    secure: false,
-    auth: {
-      user: testAccount.user,
-      pass: testAccount.pass
+    if (!response.ok) {
+      // Handle sandbox validation error
+      if (data.name === 'validation_error') {
+        console.warn(`⚠️ Resend Sandbox Warning: redirecting email for ${recipientEmail} to verified sandbox address (studyflow820@gmail.com)`);
+        const fallbackPayload = {
+          from: 'PharmaTrack <onboarding@resend.dev>',
+          to: 'studyflow820@gmail.com',
+          subject: `[FORWARDED for ${recipientEmail}] - ${subject}`,
+          html: `<div style="background: #fff8e1; border: 1px solid #ffe082; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-family: sans-serif; font-size: 0.85rem; color: #b78103;">
+            <strong>Resend Sandbox Notice:</strong> This email was originally sent to <strong>${recipientEmail}</strong> but has been forwarded to you because your Resend API Key is in Sandbox mode and only allows sending to your registered owner address.
+          </div>${html}`
+        };
+
+        const fallbackResponse = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${RESEND_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(fallbackPayload)
+        });
+
+        const fallbackData = await fallbackResponse.json();
+        if (fallbackResponse.ok) {
+          console.log(`✅ Sandbox fallback email sent successfully. ID: ${fallbackData.id}`);
+          return { success: true };
+        } else {
+          console.error('❌ Resend Sandbox fallback failed:', fallbackData);
+          return { success: false };
+        }
+      }
+
+      console.error('❌ Resend API request failed:', data);
+      return { success: false };
     }
-  });
-  return cachedTransporter;
+
+    console.log(`✅ Resend email sent successfully to ${recipientEmail}. ID: ${data.id}`);
+    return { success: true };
+  } catch (err) {
+    console.error('❌ Error sending mail via Resend:', err.message);
+    return { success: false };
+  }
 }
 
 /**
@@ -60,12 +81,6 @@ async function getTransporter() {
  */
 export async function sendAlertEmail(recipientEmail, stats, alertsList) {
   try {
-    const transporter = await getTransporter();
-    if (!transporter) {
-      console.log('Email dispatcher: No transporter available. Email logged instead.');
-      return { success: false, message: 'No email service configured.' };
-    }
-
     const nowStr = new Date().toLocaleDateString(undefined, { 
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
     });
@@ -105,11 +120,7 @@ export async function sendAlertEmail(recipientEmail, stats, alertsList) {
       });
     }
 
-    const mailOptions = {
-      from: `"PharmaTrack Alerts" <${fromEmail}>`,
-      to: recipientEmail,
-      subject: `🚨 PharmaTrack System Alert Report - ${new Date().toLocaleDateString()}`,
-      html: `
+    const htmlContent = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -186,24 +197,13 @@ export async function sendAlertEmail(recipientEmail, stats, alertsList) {
   </div>
 </body>
 </html>
-      `
-    };
+    `;
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✉️ Email alert document successfully sent to: ${recipientEmail}`);
-    
-    // If using Ethereal test account, print URL to console
-    if (testAccount && testAccount.user === transporter.options.auth.user) {
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-      console.log(`🔗 Preview Sent Email Document visually here: ${previewUrl}`);
-      return { 
-        success: true, 
-        message: 'Alert report sent. Preview Ethereal URL generated.',
-        previewUrl 
-      };
-    }
-
-    return { success: true, message: 'Alert report sent to your inbox.' };
+    return await sendMailViaResend(
+      recipientEmail, 
+      `🚨 PharmaTrack System Alert Report - ${new Date().toLocaleDateString()}`, 
+      htmlContent
+    );
   } catch (err) {
     console.error('Error dispatching alert email:', err.message);
     return { success: false, error: err.message };
@@ -215,43 +215,31 @@ export async function sendAlertEmail(recipientEmail, stats, alertsList) {
  */
 export async function sendCompanyPasskeyEmail(recipientEmail, companyName, passkey) {
   try {
-    const transporter = await getTransporter();
-    if (!transporter) return { success: false, message: 'No email service configured.' };
-
-    const mailOptions = {
-      from: `"PharmaTrack Onboarding" <${fromEmail}>`,
-      to: recipientEmail,
-      subject: `🏢 Company Registered & Passkey Generated: ${companyName}`,
-      html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden;">
-          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 30px; text-align: center; color: white;">
-            <h1 style="color: #38bdf8; margin: 0; font-size: 1.75rem; font-weight: 800;">ScanTrace Enterprise</h1>
-            <p style="color: #94a3b8; font-size: 0.9rem; margin: 5px 0 0 0;">Company Registration Confirmation</p>
-          </div>
-          <div style="padding: 24px; color: #334155; line-height: 1.6;">
-            <h2 style="font-size: 1.25rem; color: #0f172a; margin-top: 0;">Welcome to ScanTrace Enterprise, ${companyName}!</h2>
-            <p>Your company has been successfully onboarded. Here are your credentials:</p>
-            <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 1.2rem; display: block; margin: 15px 0; text-align: center;">
-              <strong>Company Passkey:</strong> <span style="color: #0ea5e9; font-weight: 700; letter-spacing: 1px;">${passkey}</span>
-            </div>
-            <p style="color: #ef4444; font-weight: 600;">⚠️ Keep this passkey secure! Your employees will require it during registration to join your organization.</p>
-            <p>You can now sign in using your admin email <strong>${recipientEmail}</strong> to access your administrative dashboard.</p>
-          </div>
-          <div style="background: #0f172a; color: #64748b; padding: 15px; text-align: center; font-size: 0.75rem;">
-            &copy; 2026 ScanTrace Enterprise. All rights reserved.
-          </div>
+    const htmlContent = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 30px; text-align: center; color: white;">
+          <h1 style="color: #38bdf8; margin: 0; font-size: 1.75rem; font-weight: 800;">ScanTrace Enterprise</h1>
+          <p style="color: #94a3b8; font-size: 0.9rem; margin: 5px 0 0 0;">Company Registration Confirmation</p>
         </div>
-      `
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✉️ Passkey email sent to admin: ${recipientEmail}`);
-    if (testAccount && testAccount.user === transporter.options.auth.user) {
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-      console.log(`🔗 Passkey Ethereal URL: ${previewUrl}`);
-      return { success: true, previewUrl };
-    }
-    return { success: true };
+        <div style="padding: 24px; color: #334155; line-height: 1.6;">
+          <h2 style="font-size: 1.25rem; color: #0f172a; margin-top: 0;">Welcome to ScanTrace Enterprise, ${companyName}!</h2>
+          <p>Your company has been successfully onboarded. Here are your credentials:</p>
+          <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; border: 1px solid #cbd5e1; font-family: monospace; font-size: 1.2rem; display: block; margin: 15px 0; text-align: center;">
+            <strong>Company Passkey:</strong> <span style="color: #0ea5e9; font-weight: 700; letter-spacing: 1px;">${passkey}</span>
+          </div>
+          <p style="color: #ef4444; font-weight: 600;">⚠️ Keep this passkey secure! Your employees will require it during registration to join your organization.</p>
+          <p>You can now sign in using your admin email <strong>${recipientEmail}</strong> to access your administrative dashboard.</p>
+        </div>
+        <div style="background: #0f172a; color: #64748b; padding: 15px; text-align: center; font-size: 0.75rem;">
+          &copy; 2026 ScanTrace Enterprise. All rights reserved.
+        </div>
+      </div>
+    `;
+    return await sendMailViaResend(
+      recipientEmail,
+      `🏢 Company Registered & Passkey Generated: ${companyName}`,
+      htmlContent
+    );
   } catch (err) {
     console.error('Error sending passkey email:', err.message);
     return { success: false, error: err.message };
@@ -263,38 +251,27 @@ export async function sendCompanyPasskeyEmail(recipientEmail, companyName, passk
  */
 export async function sendEmployeeVerificationEmail(employeeEmail, employeeName) {
   try {
-    const transporter = await getTransporter();
-    if (!transporter) return { success: false };
-
-    const mailOptions = {
-      from: `"PharmaTrack Onboarding" <${fromEmail}>`,
-      to: employeeEmail,
-      subject: `✅ Welcome to ScanTrace, ${employeeName}!`,
-      html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden;">
-          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 30px; text-align: center; color: white;">
-            <h1 style="color: #38bdf8; margin: 0; font-size: 1.75rem; font-weight: 800;">ScanTrace Enterprise</h1>
-            <p style="color: #94a3b8; font-size: 0.9rem; margin: 5px 0 0 0;">Employee Onboarding</p>
-          </div>
-          <div style="padding: 24px; color: #334155; line-height: 1.6;">
-            <h2 style="font-size: 1.25rem; color: #0f172a; margin-top: 0;">Welcome, ${employeeName}!</h2>
-            <p>Your account has been successfully registered and linked to your company workspace.</p>
-            <p>You can now sign in to view your reports, upload inventory sheets, and access your personal dashboard.</p>
-          </div>
-          <div style="background: #0f172a; color: #64748b; padding: 15px; text-align: center; font-size: 0.75rem;">
-            &copy; 2026 ScanTrace Enterprise. All rights reserved.
-          </div>
+    const htmlContent = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 30px; text-align: center; color: white;">
+          <h1 style="color: #38bdf8; margin: 0; font-size: 1.75rem; font-weight: 800;">ScanTrace Enterprise</h1>
+          <p style="color: #94a3b8; font-size: 0.9rem; margin: 5px 0 0 0;">Employee Onboarding</p>
         </div>
-      `
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✉️ Employee approval/verification email sent successfully to: ${employeeEmail}`);
-    if (testAccount && testAccount.user === transporter.options.auth.user) {
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-      console.log(`🔗 Employee Verification Ethereal URL: ${previewUrl}`);
-    }
-    return { success: true };
+        <div style="padding: 24px; color: #334155; line-height: 1.6;">
+          <h2 style="font-size: 1.25rem; color: #0f172a; margin-top: 0;">Welcome, ${employeeName}!</h2>
+          <p>Your account has been successfully registered and linked to your company workspace.</p>
+          <p>You can now sign in to view your reports, upload inventory sheets, and access your personal dashboard.</p>
+        </div>
+        <div style="background: #0f172a; color: #64748b; padding: 15px; text-align: center; font-size: 0.75rem;">
+          &copy; 2026 ScanTrace Enterprise. All rights reserved.
+        </div>
+      </div>
+    `;
+    return await sendMailViaResend(
+      employeeEmail,
+      `✅ Welcome to ScanTrace, ${employeeName}!`,
+      htmlContent
+    );
   } catch (err) {
     console.error('Error sending employee verification email:', err.message);
     return { success: false };
@@ -306,43 +283,32 @@ export async function sendEmployeeVerificationEmail(employeeEmail, employeeName)
  */
 export async function sendAdminNewEmployeeNotificationEmail(adminEmail, employeeName, employeeEmail, employeeRole) {
   try {
-    const transporter = await getTransporter();
-    if (!transporter) return { success: false };
-
-    const mailOptions = {
-      from: `"PharmaTrack Notifications" <${fromEmail}>`,
-      to: adminEmail,
-      subject: `🔔 New Personnel Registered: ${employeeName}`,
-      html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden;">
-          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 30px; text-align: center; color: white;">
-            <h1 style="color: #38bdf8; margin: 0; font-size: 1.75rem; font-weight: 800;">ScanTrace Enterprise</h1>
-            <p style="color: #94a3b8; font-size: 0.9rem; margin: 5px 0 0 0;">New User Notification</p>
-          </div>
-          <div style="padding: 24px; color: #334155; line-height: 1.6;">
-            <h2 style="font-size: 1.25rem; color: #0f172a; margin-top: 0;">New Employee Joined</h2>
-            <p>A new user has registered and linked to your company workspace using your Company Passkey.</p>
-            <ul style="padding-left: 20px;">
-              <li><strong>Name:</strong> ${employeeName}</li>
-              <li><strong>Email:</strong> ${employeeEmail}</li>
-              <li><strong>Assigned Role:</strong> ${employeeRole}</li>
-            </ul>
-            <p>You can manage employee access, edit roles, or view audit trails from your admin console.</p>
-          </div>
-          <div style="background: #0f172a; color: #64748b; padding: 15px; text-align: center; font-size: 0.75rem;">
-            &copy; 2026 ScanTrace Enterprise. All rights reserved.
-          </div>
+    const htmlContent = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 30px; text-align: center; color: white;">
+          <h1 style="color: #38bdf8; margin: 0; font-size: 1.75rem; font-weight: 800;">ScanTrace Enterprise</h1>
+          <p style="color: #94a3b8; font-size: 0.9rem; margin: 5px 0 0 0;">New User Notification</p>
         </div>
-      `
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✉️ Admin new employee notification email sent successfully to: ${adminEmail}`);
-    if (testAccount && testAccount.user === transporter.options.auth.user) {
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-      console.log(`🔗 Admin Notification Ethereal URL: ${previewUrl}`);
-    }
-    return { success: true };
+        <div style="padding: 24px; color: #334155; line-height: 1.6;">
+          <h2 style="font-size: 1.25rem; color: #0f172a; margin-top: 0;">New Employee Joined</h2>
+          <p>A new user has registered and linked to your company workspace using your Company Passkey.</p>
+          <ul style="padding-left: 20px;">
+            <li><strong>Name:</strong> ${employeeName}</li>
+            <li><strong>Email:</strong> ${employeeEmail}</li>
+            <li><strong>Assigned Role:</strong> ${employeeRole}</li>
+          </ul>
+          <p>You can manage employee access, edit roles, or view audit trails from your admin console.</p>
+        </div>
+        <div style="background: #0f172a; color: #64748b; padding: 15px; text-align: center; font-size: 0.75rem;">
+          &copy; 2026 ScanTrace Enterprise. All rights reserved.
+        </div>
+      </div>
+    `;
+    return await sendMailViaResend(
+      adminEmail,
+      `🔔 New Personnel Registered: ${employeeName}`,
+      htmlContent
+    );
   } catch (err) {
     console.error('Error sending admin employee notification email:', err.message);
     return { success: false };
@@ -354,42 +320,30 @@ export async function sendAdminNewEmployeeNotificationEmail(adminEmail, employee
  */
 export async function sendOtpEmail(recipientEmail, otpCode) {
   try {
-    const transporter = await getTransporter();
-    if (!transporter) return { success: false };
-
-    const mailOptions = {
-      from: `"PharmaTrack Auth" <${fromEmail}>`,
-      to: recipientEmail,
-      subject: `🔑 PharmaTrack Verification Code: ${otpCode}`,
-      html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden;">
-          <div style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); padding: 30px; text-align: center; color: white;">
-            <h1 style="color: white; margin: 0; font-size: 1.75rem; font-weight: 800;">PharmaTrack</h1>
-            <p style="color: rgba(255,255,255,0.8); font-size: 0.9rem; margin: 5px 0 0 0;">Email Verification</p>
-          </div>
-          <div style="padding: 24px; color: #334155; line-height: 1.6; text-align: center;">
-            <h2 style="font-size: 1.25rem; color: #0f172a; margin-top: 0;">Confirm Your Identity</h2>
-            <p>Please use the following 6-digit verification code to complete your registration:</p>
-            <div style="display: inline-block; font-size: 2.2rem; font-weight: 800; color: #0ea5e9; letter-spacing: 6px; padding: 12px 30px; border-radius: 8px; background: #f0f9ff; border: 1px dashed #0ea5e9; margin: 15px 0; font-family: monospace;">
-              ${otpCode}
-            </div>
-            <p style="font-size: 0.8rem; color: #64748b;">This code is valid for 10 minutes. If you did not request this code, please ignore this email.</p>
-          </div>
-          <div style="background: #0f172a; color: #64748b; padding: 15px; text-align: center; font-size: 0.75rem;">
-            &copy; 2026 PharmaTrack. All rights reserved.
-          </div>
+    const htmlContent = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; overflow: hidden;">
+        <div style="background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); padding: 30px; text-align: center; color: white;">
+          <h1 style="color: white; margin: 0; font-size: 1.75rem; font-weight: 800;">PharmaTrack</h1>
+          <p style="color: rgba(255,255,255,0.8); font-size: 0.9rem; margin: 5px 0 0 0;">Email Verification</p>
         </div>
-      `
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✉️ OTP verification email sent successfully to: ${recipientEmail}`);
-    let previewUrl = null;
-    if (testAccount && testAccount.user === transporter.options.auth.user) {
-      previewUrl = nodemailer.getTestMessageUrl(info);
-      console.log(`🔗 Ethereal Verification Email URL: ${previewUrl}`);
-    }
-    return { success: true, previewUrl };
+        <div style="padding: 24px; color: #334155; line-height: 1.6; text-align: center;">
+          <h2 style="font-size: 1.25rem; color: #0f172a; margin-top: 0;">Confirm Your Identity</h2>
+          <p>Please use the following 6-digit verification code to complete your registration:</p>
+          <div style="display: inline-block; font-size: 2.2rem; font-weight: 800; color: #0ea5e9; letter-spacing: 6px; padding: 12px 30px; border-radius: 8px; background: #f0f9ff; border: 1px dashed #0ea5e9; margin: 15px 0; font-family: monospace;">
+            ${otpCode}
+          </div>
+          <p style="font-size: 0.8rem; color: #64748b;">This code is valid for 10 minutes. If you did not request this code, please ignore this email.</p>
+        </div>
+        <div style="background: #0f172a; color: #64748b; padding: 15px; text-align: center; font-size: 0.75rem;">
+          &copy; 2026 PharmaTrack. All rights reserved.
+        </div>
+      </div>
+    `;
+    return await sendMailViaResend(
+      recipientEmail,
+      `🔑 PharmaTrack Verification Code: ${otpCode}`,
+      htmlContent
+    );
   } catch (err) {
     console.error('Error sending OTP verification email:', err.message);
     return { success: false };
