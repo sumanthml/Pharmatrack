@@ -10,11 +10,22 @@ function getAudioContext() {
   return audioCtx;
 }
 
+function getVolumeFactor() {
+  const isMuted = localStorage.getItem('sound_muted') === 'true';
+  if (isMuted) return 0;
+  const volumeVal = localStorage.getItem('sound_volume'); // 0 to 100
+  if (volumeVal === null) return 1; // default 100%
+  return parseFloat(volumeVal) / 100;
+}
+
 /**
  * Short high frequency scan beep.
  */
 export function playScanBeep() {
   try {
+    const volumeFactor = getVolumeFactor();
+    if (volumeFactor === 0) return;
+
     const ctx = getAudioContext();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -24,7 +35,7 @@ export function playScanBeep() {
 
     osc.type = 'sine';
     osc.frequency.setValueAtTime(1000, ctx.currentTime);
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.setValueAtTime(0.1 * volumeFactor, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
 
     osc.start(ctx.currentTime);
@@ -39,6 +50,9 @@ export function playScanBeep() {
  */
 export function playSuccessChime() {
   try {
+    const volumeFactor = getVolumeFactor();
+    if (volumeFactor === 0) return;
+
     const ctx = getAudioContext();
     const now = ctx.currentTime;
 
@@ -50,7 +64,7 @@ export function playSuccessChime() {
 
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(523.25, now);
-    gain1.gain.setValueAtTime(0.08, now);
+    gain1.gain.setValueAtTime(0.08 * volumeFactor, now);
     gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
     osc1.start(now);
     osc1.stop(now + 0.15);
@@ -63,7 +77,7 @@ export function playSuccessChime() {
 
     osc2.type = 'sine';
     osc2.frequency.setValueAtTime(659.25, now + 0.1);
-    gain2.gain.setValueAtTime(0.08, now + 0.1);
+    gain2.gain.setValueAtTime(0.08 * volumeFactor, now + 0.1);
     gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
     osc2.start(now + 0.1);
     osc2.stop(now + 0.3);
@@ -77,6 +91,9 @@ export function playSuccessChime() {
  */
 export function playWarningBeep() {
   try {
+    const volumeFactor = getVolumeFactor();
+    if (volumeFactor === 0) return;
+
     const ctx = getAudioContext();
     const now = ctx.currentTime;
 
@@ -88,7 +105,7 @@ export function playWarningBeep() {
 
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(220, time);
-      gain.gain.setValueAtTime(0.12, time);
+      gain.gain.setValueAtTime(0.12 * volumeFactor, time);
       gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
       osc.start(time);
       osc.stop(time + duration);

@@ -33,8 +33,6 @@ export default function Login({ onAuthSuccess }) {
   const [isMobileVerified, setIsMobileVerified] = useState(false);
   const [pendingFormSubmit, setPendingFormSubmit] = useState(null);
   const [currentOtp, setCurrentOtp] = useState('');
-  const [smsNotification, setSmsNotification] = useState(null);
-  const [smsActive, setSmsActive] = useState(false);
 
   // Success view (to display generated passkey to new Company Admins)
   const [successPasskey, setSuccessPasskey] = useState('');
@@ -59,19 +57,8 @@ export default function Login({ onAuthSuccess }) {
         const errData = await res.json();
         throw new Error(errData.error || 'Failed to dispatch verification code.');
       }
-
-      const data = await res.json();
-      
       // Play audio cue
       playScanBeep();
-
-      // Simulate slide-down browser notification banner for testing
-      setSmsNotification({ phone: targetEmail, code: data.code });
-      setSmsActive(true);
-      setTimeout(() => {
-        setSmsActive(false);
-        setTimeout(() => setSmsNotification(null), 400);
-      }, 10000);
     } catch (err) {
       playWarningBeep();
       setOtpError(err.message);
@@ -100,8 +87,6 @@ export default function Login({ onAuthSuccess }) {
       setIsMobileVerified(true);
       setShowOtpModal(false);
       setOtpLoading(false);
-      setSmsActive(false);
-      setSmsNotification(null);
 
       // Play success audio chime
       playSuccessChime();
@@ -120,8 +105,6 @@ export default function Login({ onAuthSuccess }) {
   const handleResendOtp = async () => {
     setOtpCode('');
     setOtpError('');
-    setSmsActive(false);
-    setSmsNotification(null);
     setOtpLoading(true);
 
     try {
@@ -135,18 +118,8 @@ export default function Login({ onAuthSuccess }) {
         const errData = await res.json();
         throw new Error(errData.error || 'Failed to dispatch verification code.');
       }
-
-      const data = await res.json();
-      
       // Play audio cue
       playScanBeep();
-
-      setSmsNotification({ phone: otpTargetMobile, code: data.code });
-      setSmsActive(true);
-      setTimeout(() => {
-        setSmsActive(false);
-        setTimeout(() => setSmsNotification(null), 400);
-      }, 10000);
     } catch (err) {
       playWarningBeep();
       setOtpError(err.message);
@@ -333,53 +306,7 @@ export default function Login({ onAuthSuccess }) {
       padding: '1.5rem',
       position: 'relative'
     }}>
-      {/* Simulated SMS Notification Banner */}
-      {smsNotification && (
-        <div style={{
-          position: 'fixed',
-          top: smsActive ? '20px' : '-120px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: '90%',
-          maxWidth: '360px',
-          background: 'rgba(15, 23, 42, 0.9)',
-          backdropFilter: 'blur(12px)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          borderRadius: '16px',
-          padding: '0.85rem 1.1rem',
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
-          zIndex: 9999,
-          display: 'flex',
-          gap: '0.75rem',
-          alignItems: 'center',
-          transition: 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
-          cursor: 'pointer'
-        }} onClick={() => setSmsActive(false)}>
-          <div style={{
-            background: 'rgba(14, 165, 233, 0.15)',
-            border: '1px solid rgba(14, 165, 233, 0.3)',
-            borderRadius: '10px',
-            width: '38px',
-            height: '38px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#0ea5e9',
-            flexShrink: 0
-          }}>
-            <Mail size={20} />
-          </div>
-          <div style={{ flex: 1, textAlign: 'left' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.15rem' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.5px' }}>📧 Email • PharmaTrack</span>
-              <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>now</span>
-            </div>
-            <p style={{ fontSize: '0.8rem', color: '#cbd5e1', margin: 0, lineHeight: 1.3 }}>
-              Your verification code is: <strong style={{ color: '#0ea5e9', fontSize: '0.85rem', fontFamily: 'monospace', letterSpacing: '1px' }}>{smsNotification.code}</strong>. Valid for 5 minutes.
-            </p>
-          </div>
-        </div>
-      )}
+
       <div className="glass-card modal-content" style={{
         maxWidth: '460px',
         width: '100%',
@@ -591,11 +518,11 @@ export default function Login({ onAuthSuccess }) {
       {showOtpModal && (
         <div className="modal-overlay" style={{ zIndex: 1000 }}>
           <div className="glass-card modal-content" style={{ maxWidth: '380px', padding: '2rem 1.5rem', textAlign: 'center', border: '1px solid rgba(14, 165, 233, 0.3)' }}>
-            <Smartphone size={32} style={{ color: 'var(--primary)', marginBottom: '1rem' }} />
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem' }}>OTP Mobile Verification</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.25rem', lineHeight: 1.4 }}>
-              A simulated 6-digit verification code has been dispatched to <strong>{otpTargetMobile}</strong> via SMS.<br/>
-              Please check your phone's notifications and enter the code below.
+            <Mail size={32} style={{ color: 'var(--primary)', marginBottom: '1rem' }} />
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem' }}>OTP Email Verification</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+              A 6-digit verification code has been dispatched to <strong>{otpTargetMobile}</strong>.<br/>
+              Please check your email inbox (including Spam folder) and enter the code below.
             </p>
 
             {otpError && (
@@ -621,7 +548,7 @@ export default function Login({ onAuthSuccess }) {
               <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
                 <button
                   type="button"
-                  onClick={() => { setShowOtpModal(false); setSmsActive(false); setSmsNotification(null); }}
+                  onClick={() => { setShowOtpModal(false); }}
                   className="btn btn-secondary"
                   style={{ flex: 1, padding: '0.6rem', borderRadius: '8px', fontSize: '0.85rem' }}
                 >

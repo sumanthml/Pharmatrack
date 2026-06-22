@@ -13,7 +13,7 @@ import {
   User
 } from 'lucide-react';
 
-export default function Sidebar({ activeTab, setActiveTab, alertsCount = 0, branding }) {
+export default function Sidebar({ activeTab, setActiveTab, alertsCount = 0, branding, dbStatus }) {
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -69,6 +69,36 @@ export default function Sidebar({ activeTab, setActiveTab, alertsCount = 0, bran
           })}
         </div>
 
+        {/* DB Connection Indicator */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          padding: '0.65rem 0.85rem',
+          margin: 'auto 0.75rem 0.75rem 0.75rem',
+          background: 'rgba(255, 255, 255, 0.02)',
+          border: '1px solid rgba(255, 255, 255, 0.05)',
+          borderRadius: '8px',
+          fontSize: '0.75rem'
+        }}>
+          <span style={{
+            display: 'inline-block',
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: dbStatus === 'connected' ? '#10b981' : dbStatus === 'offline' ? '#ef4444' : '#eab308',
+            boxShadow: dbStatus === 'connected' 
+              ? '0 0 8px #10b981' 
+              : dbStatus === 'offline' 
+                ? '0 0 8px #ef4444' 
+                : '0 0 8px #eab308',
+            animation: dbStatus === 'connected' ? 'none' : 'pulse 1.5s infinite'
+          }} />
+          <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>
+            {dbStatus === 'connected' ? 'DB Connected' : dbStatus === 'offline' ? 'DB Offline' : 'Checking DB...'}
+          </span>
+        </div>
+
         <button 
           onClick={handleLogout} 
           className="btn nav-item logout-button"
@@ -112,9 +142,19 @@ export default function Sidebar({ activeTab, setActiveTab, alertsCount = 0, bran
             </button>
           );
         })}
-        <button onClick={handleLogout} className="mobile-nav-item" style={{ color: 'var(--danger)' }}>
+        <button onClick={handleLogout} className="mobile-nav-item" style={{ color: 'var(--danger)', position: 'relative' }}>
           <LogOut size={20} />
           <span>Exit</span>
+          <span style={{
+            position: 'absolute',
+            top: '4px',
+            right: '4px',
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            background: dbStatus === 'connected' ? '#10b981' : dbStatus === 'offline' ? '#ef4444' : '#eab308',
+            boxShadow: dbStatus === 'connected' ? '0 0 4px #10b981' : dbStatus === 'offline' ? '0 0 4px #ef4444' : '0 0 4px #eab308'
+          }} title={dbStatus === 'connected' ? 'Database Connected' : 'Database Offline'} />
         </button>
       </nav>
     </>

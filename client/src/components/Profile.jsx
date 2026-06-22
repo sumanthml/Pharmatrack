@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { User, Mail, Phone, MapPin, FileText, Save, CheckCircle, Shield, Building, Bell, Palette, Image } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { showToast } from '../utils/toast';
 
 export default function Profile({ user, onBrandingUpdate }) {
   const [profile, setProfile] = useState({
@@ -32,12 +33,31 @@ export default function Profile({ user, onBrandingUpdate }) {
   // Workspace Branding Settings
   const [logoUrl, setLogoUrl] = useState('');
   const [themeColor, setThemeColor] = useState('#0ea5e9');
+  const [companyPasskey, setCompanyPasskey] = useState('');
   const [brandingLoading, setBrandingLoading] = useState(false);
   const [brandingSuccess, setBrandingSuccess] = useState(false);
 
   // Audit Logs Filtering & Search States
   const [searchQuery, setSearchQuery] = useState('');
   const [actionFilter, setActionFilter] = useState('ALL');
+
+  const [soundVolume, setSoundVolume] = useState(() => {
+    const vol = localStorage.getItem('sound_volume');
+    return vol !== null ? parseInt(vol) : 100;
+  });
+  const [soundMuted, setSoundMuted] = useState(() => {
+    return localStorage.getItem('sound_muted') === 'true';
+  });
+
+  const handleVolumeChange = (newVol) => {
+    setSoundVolume(newVol);
+    localStorage.setItem('sound_volume', newVol.toString());
+  };
+
+  const handleMuteChange = (newMuted) => {
+    setSoundMuted(newMuted);
+    localStorage.setItem('sound_muted', newMuted.toString());
+  };
 
   const fetchAuditLogs = async () => {
     setLoadingLogs(true);
@@ -123,6 +143,7 @@ export default function Profile({ user, onBrandingUpdate }) {
         const data = await res.json();
         setLogoUrl(data.logo_url || '');
         setThemeColor(data.theme_color || '#0ea5e9');
+        setCompanyPasskey(data.passkey || '');
       }
     } catch (err) {
       console.error('Error fetching company branding:', err.message);
@@ -153,7 +174,7 @@ export default function Profile({ user, onBrandingUpdate }) {
         onBrandingUpdate();
       }
     } catch (err) {
-      alert(`Error updating branding settings: ${err.message}`);
+      showToast(`Error updating branding settings: ${err.message}`, 'error');
     } finally {
       setBrandingLoading(false);
     }
@@ -257,7 +278,7 @@ export default function Profile({ user, onBrandingUpdate }) {
         fetchEmployees();
       }
     } catch (err) {
-      alert(`Error updating profile: ${err.message}`);
+      showToast(`Error updating profile: ${err.message}`, 'error');
     } finally {
       setSaveLoading(false);
     }
@@ -472,6 +493,51 @@ export default function Profile({ user, onBrandingUpdate }) {
               )}
             </div>
 
+            {/* Tactile Audio Settings */}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1.25rem', marginTop: '1.25rem' }}>
+              <h3 style={{ fontSize: '1.025rem', fontWeight: 600, marginBottom: '1rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Palette size={16} style={{ color: 'var(--primary)' }} /> Tactile Sound Feedback
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: '1.4' }}>
+                Control the volume of barcode scanning sounds, checkout success chimes, and validation warnings.
+              </p>
+              
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '2rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexGrow: 1, minWidth: '200px' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Volume:</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    disabled={soundMuted}
+                    value={soundVolume}
+                    onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
+                    style={{
+                      flexGrow: 1,
+                      accentColor: 'var(--primary)',
+                      height: '6px',
+                      borderRadius: '3px',
+                      background: 'rgba(255,255,255,0.1)',
+                      cursor: 'pointer'
+                    }}
+                  />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, minWidth: '35px', textAlign: 'right' }}>
+                    {soundMuted ? 'Muted' : `${soundVolume}%`}
+                  </span>
+                </div>
+
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={soundMuted}
+                    onChange={(e) => handleMuteChange(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: 'var(--primary)' }}
+                  />
+                  <span>Mute Audio Cue Sounds</span>
+                </label>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: saveSuccess ? 1 : 0, transition: 'opacity 0.3s' }}>
                 <CheckCircle size={18} style={{ color: '#10b981' }} />
@@ -504,6 +570,46 @@ export default function Profile({ user, onBrandingUpdate }) {
                 {loadingEmployees ? 'Refreshing...' : 'Refresh Team'}
               </button>
             </h2>
+            
+            {companyPasskey && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'rgba(14, 165, 233, 0.08)',
+                border: '1px dashed rgba(14, 165, 233, 0.3)',
+                padding: '0.85rem 1rem',
+                borderRadius: '8px',
+                marginBottom: '1.5rem',
+                fontSize: '0.9rem',
+                color: 'var(--text)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ color: 'var(--primary)', fontWeight: 600 }}>🔑 Share Workspace Passkey:</span>
+                  <code style={{
+                    background: 'rgba(0,0,0,0.3)',
+                    padding: '0.25rem 0.6rem',
+                    borderRadius: '4px',
+                    fontFamily: 'monospace',
+                    fontWeight: 'bold',
+                    color: '#38bdf8',
+                    letterSpacing: '0.05em',
+                    border: '1px solid rgba(14, 165, 233, 0.2)'
+                  }}>{companyPasskey}</code>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(companyPasskey);
+                    showToast('Company Passkey copied to clipboard!', 'success');
+                  }}
+                >
+                  Copy Passkey
+                </button>
+              </div>
+            )}
 
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>

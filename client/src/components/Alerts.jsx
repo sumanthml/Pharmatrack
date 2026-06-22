@@ -317,54 +317,7 @@ export default function Alerts({ socket, user }) {
     }
   };
 
-  // Send Alerts to WhatsApp
-  const handleWhatsAppShare = () => {
-    if (totalActiveAlerts === 0) {
-      alert("No active warnings to share.");
-      return;
-    }
 
-    let message = `🚨 *PharmaTrack System Alerts Report* 🚨\n\n`;
-
-    if (expired.length > 0) {
-      message += `🛑 *Expired Batches (${expired.length}):*\n`;
-      expired.forEach(med => {
-        message += `- ${med.name} (Batch: ${med.batch_number}) | Expired: ${new Date(med.expiry_date).toISOString().split('T')[0]}\n`;
-      });
-      message += `\n`;
-    }
-
-    if (outOfStock.length > 0) {
-      message += `🚨 *Out of Stock (${outOfStock.length}):*\n`;
-      outOfStock.forEach(med => {
-        message += `- ${med.name} (Batch: ${med.batch_number})\n`;
-      });
-      message += `\n`;
-    }
-
-    if (lowStock.length > 0) {
-      message += `⚠️ *Low Stock Warnings (${lowStock.length}):*\n`;
-      lowStock.forEach(med => {
-        message += `- ${med.name} (Batch: ${med.batch_number}) | Qty: ${med.quantity} (Threshold: ${med.min_stock_level})\n`;
-      });
-      message += `\n`;
-    }
-
-    if (nearExpiry.length > 0) {
-      message += `⏳ *Near Expiry Warnings (${nearExpiry.length}):*\n`;
-      nearExpiry.forEach(med => {
-        const diff = Math.ceil((new Date(med.expiry_date) - now) / (1000 * 60 * 60 * 24));
-        message += `- ${med.name} (Batch: ${med.batch_number}) | Expires in ${diff} days (${new Date(med.expiry_date).toISOString().split('T')[0]})\n`;
-      });
-      message += `\n`;
-    }
-
-    message += `Please review details on dashboard.`;
-
-    const cleanPhone = profile.company_phone ? profile.company_phone.replace(/[^0-9]/g, '') : '';
-    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, '_blank');
-  };
 
   const alertEmailAddress = profile.alert_email || user.email || 'Not Configured';
 
@@ -449,42 +402,7 @@ export default function Alerts({ socket, user }) {
             </button>
           </div>
 
-          {/* WhatsApp dispatch trigger card */}
-          <div className="glass-card" style={{ border: '1px solid rgba(37,211,102,0.25)', background: 'linear-gradient(135deg, rgba(37,211,102,0.08) 0%, transparent 100%)' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <MessageSquare size={18} style={{ color: '#25D366' }} />
-              WhatsApp Alert Report
-            </h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem', lineHeight: '1.4' }}>
-              Share all current active system alerts in real-time via WhatsApp Click-to-Chat.
-            </p>
 
-            <div style={{
-              background: 'rgba(255,255,255,0.02)',
-              border: '1px solid rgba(255,255,255,0.05)',
-              padding: '1rem',
-              borderRadius: '8px',
-              fontSize: '0.9rem',
-              wordBreak: 'break-all',
-              marginBottom: '1.25rem'
-            }}>
-              <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem', fontWeight: 600, textTransform: 'uppercase' }}>
-                Recipient Phone Number
-              </span>
-              <strong style={{ color: '#25D366', fontSize: '0.95rem' }}>
-                {profile.company_phone || 'Not Configured (Sends to General Share)'}
-              </strong>
-            </div>
-
-            <button 
-              onClick={handleWhatsAppShare} 
-              className="btn btn-secondary" 
-              style={{ width: '100%', gap: '0.5rem', borderColor: 'rgba(37,211,102,0.3)', color: '#25D366' }}
-            >
-              <MessageSquare size={16} />
-              Share Alerts on WhatsApp
-            </button>
-          </div>
         </div>
 
         {/* Right Column: In-App Alerts Feed & Active Alerts summaries */}

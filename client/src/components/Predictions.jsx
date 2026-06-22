@@ -29,6 +29,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { showToast } from '../utils/toast';
 
 // Register ChartJS elements
 ChartJS.register(
@@ -118,11 +119,11 @@ export default function Predictions({ socket, user }) {
       });
 
       if (!res.ok) throw new Error('Failed to update price');
-      alert(`Successfully discounted ${discountMed.name} to $${newPrice}!`);
+      showToast(`Successfully discounted ${discountMed.name} to $${newPrice}!`, 'success');
       setDiscountMed(null);
       fetchPredictions();
     } catch (err) {
-      alert(`Error discounting: ${err.message}`);
+      showToast(`Error discounting: ${err.message}`, 'error');
     }
   };
 
@@ -524,19 +525,6 @@ export default function Predictions({ socket, user }) {
                         <a href={`mailto:${med.supplierEmail}?subject=Purchase%20Order:%20${encodeURIComponent(med.name)}&body=Dear%20Supplier,%0D%0A%0D%0AWe%20would%20like%20to%20order%20${med.recommendedOrderQty}%20units%20of%20${encodeURIComponent(med.name)}.%20Please%20confirm%20pricing%20and%20estimated%20delivery%20date.%0D%0A%0D%0ABest%20Regards,%0D%0APharmacy%20Inventory%20Team`} className="btn btn-primary" style={{ textDecoration: 'none' }}>
                           <Mail size={14} />
                           Order stock
-                        </a>
-                      )}
-                      
-                      {med.recommendedOrderQty > 0 && med.supplierPhone && (
-                        <a 
-                          href={`https://wa.me/${med.supplierPhone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello, we would like to order ${med.recommendedOrderQty} units of ${med.name}. Please confirm pricing and delivery. Thanks!`)}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className="btn btn-secondary" 
-                          style={{ textDecoration: 'none', color: '#25D366', borderColor: 'rgba(37,211,102,0.3)', gap: '0.4rem', display: 'flex', alignItems: 'center' }}
-                        >
-                          <MessageSquare size={14} />
-                          WhatsApp PO
                         </a>
                       )}
                     </div>

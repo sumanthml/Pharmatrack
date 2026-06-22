@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { API_BASE_URL } from '../config';
+import { showToast } from '../utils/toast';
 
 export default function Inventory({ socket, user }) {
   const [medicines, setMedicines] = useState([]);
@@ -478,7 +479,7 @@ export default function Inventory({ socket, user }) {
       });
       if (!res.ok) throw new Error('Delete failed');
     } catch (err) {
-      alert(`Error deleting: ${err.message}`);
+      showToast(`Error deleting: ${err.message}`, 'error');
     }
   };
 
@@ -541,7 +542,7 @@ export default function Inventory({ socket, user }) {
 
       if (!res.ok) throw new Error('Failed to update stock quantity.');
     } catch (err) {
-      alert(`Error updating stock: ${err.message}`);
+      showToast(`Error updating stock: ${err.message}`, 'error');
     }
   };
 

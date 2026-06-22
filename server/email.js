@@ -4,13 +4,20 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 let testAccount = null;
+let cachedTransporter = null;
+const fromEmail = process.env.SMTP_USER || 'noreply@pharmatrack.com';
 
 /**
  * Resolves the Nodemailer transporter (SMTP or Ethereal test account).
  */
 async function getTransporter() {
+  if (cachedTransporter) return cachedTransporter;
+
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    return nodemailer.createTransport({
+    cachedTransporter = nodemailer.createTransport({
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100,
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT) || 587,
       secure: process.env.SMTP_PORT === '465',
@@ -19,6 +26,7 @@ async function getTransporter() {
         pass: process.env.SMTP_PASS
       }
     });
+    return cachedTransporter;
   }
 
   // Fallback: Create dynamic ethereal account for instant developer testing
@@ -32,7 +40,7 @@ async function getTransporter() {
     }
   }
 
-  return nodemailer.createTransport({
+  cachedTransporter = nodemailer.createTransport({
     host: 'smtp.ethereal.email',
     port: 587,
     secure: false,
@@ -41,6 +49,7 @@ async function getTransporter() {
       pass: testAccount.pass
     }
   });
+  return cachedTransporter;
 }
 
 /**
@@ -94,7 +103,7 @@ export async function sendAlertEmail(recipientEmail, stats, alertsList) {
     }
 
     const mailOptions = {
-      from: '"PharmaTrack Alerts" <alerts@pharmatrack.com>',
+      from: `"PharmaTrack Alerts" <${fromEmail}>`,
       to: recipientEmail,
       subject: `🚨 PharmaTrack System Alert Report - ${new Date().toLocaleDateString()}`,
       html: `
@@ -207,7 +216,7 @@ export async function sendCompanyPasskeyEmail(recipientEmail, companyName, passk
     if (!transporter) return { success: false, message: 'No email service configured.' };
 
     const mailOptions = {
-      from: '"ScanTrace Enterprise" <onboarding@scantrace.com>',
+      from: `"PharmaTrack Onboarding" <${fromEmail}>`,
       to: recipientEmail,
       subject: `🏢 Company Registered & Passkey Generated: ${companyName}`,
       html: `
@@ -255,7 +264,7 @@ export async function sendEmployeeVerificationEmail(employeeEmail, employeeName)
     if (!transporter) return { success: false };
 
     const mailOptions = {
-      from: '"ScanTrace Enterprise" <onboarding@scantrace.com>',
+      from: `"PharmaTrack Onboarding" <${fromEmail}>`,
       to: employeeEmail,
       subject: `✅ Welcome to ScanTrace, ${employeeName}!`,
       html: `
@@ -277,6 +286,7 @@ export async function sendEmployeeVerificationEmail(employeeEmail, employeeName)
     };
 
     const info = await transporter.sendMail(mailOptions);
+    console.log(`✉️ Employee approval/verification email sent successfully to: ${employeeEmail}`);
     if (testAccount && testAccount.user === transporter.options.auth.user) {
       const previewUrl = nodemailer.getTestMessageUrl(info);
       console.log(`🔗 Employee Verification Ethereal URL: ${previewUrl}`);
@@ -297,7 +307,7 @@ export async function sendAdminNewEmployeeNotificationEmail(adminEmail, employee
     if (!transporter) return { success: false };
 
     const mailOptions = {
-      from: '"ScanTrace Enterprise" <notifications@scantrace.com>',
+      from: `"PharmaTrack Notifications" <${fromEmail}>`,
       to: adminEmail,
       subject: `🔔 New Personnel Registered: ${employeeName}`,
       html: `
@@ -324,6 +334,7 @@ export async function sendAdminNewEmployeeNotificationEmail(adminEmail, employee
     };
 
     const info = await transporter.sendMail(mailOptions);
+    console.log(`✉️ Admin new employee notification email sent successfully to: ${adminEmail}`);
     if (testAccount && testAccount.user === transporter.options.auth.user) {
       const previewUrl = nodemailer.getTestMessageUrl(info);
       console.log(`🔗 Admin Notification Ethereal URL: ${previewUrl}`);
@@ -344,7 +355,7 @@ export async function sendOtpEmail(recipientEmail, otpCode) {
     if (!transporter) return { success: false };
 
     const mailOptions = {
-      from: '"PharmaTrack Auth" <auth@pharmatrack.com>',
+      from: `"PharmaTrack Auth" <${fromEmail}>`,
       to: recipientEmail,
       subject: `🔑 PharmaTrack Verification Code: ${otpCode}`,
       html: `
@@ -369,6 +380,7 @@ export async function sendOtpEmail(recipientEmail, otpCode) {
     };
 
     const info = await transporter.sendMail(mailOptions);
+    console.log(`✉️ OTP verification email sent successfully to: ${recipientEmail}`);
     let previewUrl = null;
     if (testAccount && testAccount.user === transporter.options.auth.user) {
       previewUrl = nodemailer.getTestMessageUrl(info);

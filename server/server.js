@@ -45,6 +45,16 @@ async function authenticateUser(req, res, next) {
         const decodedToken = await admin.auth().verifyIdToken(token);
         req.uid = decodedToken.uid;
         req.email = decodedToken.email;
+        
+        // Block unverified company employees (except for profile checks)
+        const isProfileRequest = req.path.startsWith('/api/users/profile/') || req.path.startsWith('/api/companies/verify-passkey');
+        if (!isProfileRequest) {
+          const scope = await getUserScope(req.uid);
+          if (scope.companyId && !scope.isVerified && scope.role !== 'admin') {
+            return res.status(403).json({ error: 'Access Denied: Pending Administrator Verification.' });
+          }
+        }
+        
         return next();
       }
     } catch (err) {
@@ -57,6 +67,20 @@ async function authenticateUser(req, res, next) {
   const userId = req.query.userId || req.body.userId || req.params.id;
   if (userId) {
     req.uid = userId;
+    
+    // Block unverified company employees (except for profile checks)
+    const isProfileRequest = req.path.startsWith('/api/users/profile/') || req.path.startsWith('/api/companies/verify-passkey');
+    if (!isProfileRequest) {
+      try {
+        const scope = await getUserScope(req.uid);
+        if (scope.companyId && !scope.isVerified && scope.role !== 'admin') {
+          return res.status(403).json({ error: 'Access Denied: Pending Administrator Verification.' });
+        }
+      } catch (err) {
+        console.error('Scope verification check failed:', err.message);
+      }
+    }
+    
     return next();
   }
 
@@ -118,6 +142,17 @@ async function seedMockData() {
 }
 
 // REST API Routes
+
+// Database health check endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    const dbRes = await pool.query('SELECT NOW()');
+    res.json({ status: 'healthy', database: 'connected', time: dbRes.rows[0].now });
+  } catch (err) {
+    console.error('❌ Health check DB error:', err.message);
+    res.status(503).json({ status: 'unhealthy', database: 'disconnected', error: err.message });
+  }
+});
 
 // Helper for logging audit trails
 async function logAudit(userId, companyId, actionType, ip, userAgent) {
@@ -186,65 +221,7 @@ async function sendTelegramNotification(chatId, message) {
     console.error('Error triggering Telegram notification:', err.message);
   }
 }
-async function sendWhatsAppNotification(toPhone, message) {
-  if (!toPhone) return;
-  console.log(`📱 WhatsApp notification sent to ${toPhone}: ${message}`);
-  
-  // If Twilio settings are configured in env, we trigger them via HTTP request
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const fromPhone = process.env.TWILIO_WHATSAPP_NUMBER || '+14155238886'; // default Twilio sandbox number
-  
-  if (accountSid && authToken) {
-    try {
-      const cleanTo = toPhone.trim().replace(/[^0-9+]/g, '');
-      const formattedTo = cleanTo.startsWith('+') ? cleanTo : `+${cleanTo}`;
-      const cleanFrom = fromPhone.trim().replace(/[^0-9+]/g, '');
-      const formattedFrom = cleanFrom.startsWith('+') ? cleanFrom : `+${cleanFrom}`;
 
-      const postData = new URLSearchParams({
-        To: `whatsapp:${formattedTo}`,
-        From: `whatsapp:${formattedFrom}`,
-        Body: message
-      }).toString();
-
-      const options = {
-        hostname: 'api.twilio.com',
-        port: 443,
-        path: `/2010-04-01/Accounts/${accountSid}/Messages.json`,
-        method: 'POST',
-        headers: {
-          'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': Buffer.byteLength(postData)
-        }
-      };
-
-      const req = https.request(options, (res) => {
-        let body = '';
-        res.on('data', (chunk) => { body += chunk; });
-        res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            console.log(`✅ WhatsApp successfully dispatched via Twilio to ${toPhone}`);
-          } else {
-            console.error(`❌ Twilio WhatsApp response error (Status ${res.statusCode}):`, body);
-          }
-        });
-      });
-
-      req.on('error', (e) => {
-        console.error('Twilio WhatsApp request error:', e.message);
-      });
-
-      req.write(postData);
-      req.end();
-    } catch (e) {
-      console.error('Error constructing Twilio WhatsApp payload:', e.message);
-    }
-  } else {
-    console.log('💡 Note: Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_NUMBER in your .env to dispatch live WhatsApp notifications.');
-  }
-}
 
 // Helper to resolve company_id, role, and preferences
 async function getUserScope(userId) {
@@ -255,13 +232,13 @@ async function getUserScope(userId) {
   };
   try {
     const res = await pool.query(
-      `SELECT company_id, role, pref_email, pref_in_app, pref_slack_telegram, slack_webhook_url, telegram_chat_id, pref_whatsapp, whatsapp_number, email, alert_email 
+      `SELECT company_id, role, pref_email, pref_in_app, pref_slack_telegram, slack_webhook_url, telegram_chat_id, pref_whatsapp, whatsapp_number, email, alert_email, is_verified 
        FROM users WHERE id = $1`, 
       [userId]
     );
     if (res.rows.length === 0) {
       return { 
-        companyId: null, role: 'employee', 
+        companyId: null, role: 'employee', isVerified: false,
         prefEmail: true, prefInApp: true, prefSlackTelegram: false, prefWhatsApp: false,
         slackWebhookUrl: null, telegramChatId: null, whatsappNumber: null, email: null, alertEmail: null 
       };
@@ -270,6 +247,7 @@ async function getUserScope(userId) {
     return {
       companyId: row.company_id,
       role: row.role,
+      isVerified: row.role === 'admin' ? true : (row.is_verified !== null ? !!row.is_verified : false),
       prefEmail: row.pref_email !== null ? row.pref_email : true,
       prefInApp: row.pref_in_app !== null ? row.pref_in_app : true,
       prefSlackTelegram: !!row.pref_slack_telegram,
@@ -313,8 +291,7 @@ app.post('/api/auth/send-otp', async (req, res) => {
     }
 
     res.json({ 
-      message: 'Verification OTP sent to email successfully.',
-      code: randomOtp 
+      message: 'Verification OTP sent to email successfully.'
     });
   } catch (err) {
     console.error('Error sending OTP:', err.message);
@@ -413,7 +390,7 @@ app.get('/api/companies/settings', authenticateUser, async (req, res) => {
     if (!companyId) {
       return res.status(400).json({ error: 'User is not associated with any company.' });
     }
-    const result = await pool.query('SELECT name, logo_url, theme_color, phone, email, pref_whatsapp, whatsapp_number FROM companies WHERE id = $1', [companyId]);
+    const result = await pool.query('SELECT name, logo_url, theme_color, phone, email, pref_whatsapp, whatsapp_number, passkey FROM companies WHERE id = $1', [companyId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Company settings not found.' });
     }
@@ -474,14 +451,14 @@ app.post('/api/companies/verify-passkey', async (req, res) => {
   try {
     let result;
     if (company_email) {
-      // Check both passkey and company email
+      // Check both passkey and company email case-insensitively
       result = await pool.query(
-        'SELECT * FROM companies WHERE passkey = $1 AND email = $2',
+        'SELECT * FROM companies WHERE LOWER(passkey) = LOWER($1) AND LOWER(email) = LOWER($2)',
         [passkey.trim(), company_email.trim()]
       );
     } else {
       result = await pool.query(
-        'SELECT * FROM companies WHERE passkey = $1',
+        'SELECT * FROM companies WHERE LOWER(passkey) = LOWER($1)',
         [passkey.trim()]
       );
     }
@@ -701,7 +678,13 @@ app.post('/api/users/profile/:id/send-alerts-email', async (req, res) => {
       return res.status(400).json({ error: 'No alert email configured.' });
     }
 
-    const medsRes = await pool.query('SELECT * FROM medicines WHERE user_id = $1', [id]);
+    const scope = await getUserScope(id);
+    let medsRes;
+    if (scope.companyId) {
+      medsRes = await pool.query('SELECT * FROM medicines WHERE company_id = $1', [scope.companyId]);
+    } else {
+      medsRes = await pool.query('SELECT * FROM medicines WHERE user_id = $1', [id]);
+    }
     const meds = medsRes.rows;
     const now = new Date();
     
@@ -1140,10 +1123,7 @@ async function checkMedAlerts(med) {
       }
     }
 
-    // 5. WhatsApp Notification Dispatch
-    if (scope.prefWhatsApp && scope.whatsappNumber) {
-      sendWhatsAppNotification(scope.whatsappNumber, `PharmaTrack Stock Alert:\n${alertMessage}`);
-    }
+
   }
 }
 
@@ -1466,6 +1446,19 @@ app.get('/api/audit-logs', authenticateUser, async (req, res) => {
   }
 });
 
+// Post custom audit logs from client
+app.post('/api/audit-logs', async (req, res) => {
+  const { userId, actionType } = req.body;
+  try {
+    const scope = await getUserScope(userId);
+    await logAudit(userId, scope.companyId, actionType, req.ip, req.headers['user-agent']);
+    res.status(201).json({ success: true });
+  } catch (err) {
+    console.error('Error logging audit from client:', err.message);
+    res.status(500).json({ error: 'Server error logging audit' });
+  }
+});
+
 // Employee Control Panel - Get Employees
 app.get('/api/companies/employees', authenticateUser, async (req, res) => {
   const userId = req.uid;
@@ -1520,9 +1513,17 @@ app.put('/api/users/:id/verify-status', authenticateUser, async (req, res) => {
       [is_verified !== undefined ? is_verified : true, role || null, targetUid]
     );
 
-    await logAudit(adminUid, adminScope.companyId, `EMPLOYEE_VERIFY_${(is_verified ? 'TRUE' : 'FALSE')}`, req.ip, req.headers['user-agent']);
+    const updatedUser = result.rows[0];
 
-    res.json(result.rows[0]);
+    await logAudit(adminUid, adminScope.companyId, `EMPLOYEE_VERIFY_${(is_verified !== false ? 'TRUE' : 'FALSE')}`, req.ip, req.headers['user-agent']);
+
+    if (updatedUser.is_verified) {
+      sendEmployeeVerificationEmail(updatedUser.email, updatedUser.name || 'Employee').catch(e => 
+        console.error('Failed to send employee approval email:', e.message)
+      );
+    }
+
+    res.json(updatedUser);
   } catch (err) {
     console.error('Error verifying employee:', err.message);
     res.status(500).json({ error: 'Server error managing employee verification.' });
@@ -1958,7 +1959,13 @@ app.get('/api/insights', async (req, res) => {
   }
 
   try {
-    const inventoryRes = await pool.query('SELECT * FROM medicines WHERE user_id = $1', [userId]);
+    const { companyId } = await getUserScope(userId);
+    let inventoryRes;
+    if (companyId) {
+      inventoryRes = await pool.query('SELECT * FROM medicines WHERE company_id = $1', [companyId]);
+    } else {
+      inventoryRes = await pool.query('SELECT * FROM medicines WHERE user_id = $1', [userId]);
+    }
     const predictions = await getPredictionsWithCache(userId);
     
     const insights = await generateInsights(inventoryRes.rows, predictions);
@@ -2165,6 +2172,7 @@ async function migrateDatabase(retries = 3, delay = 3000) {
         ALTER TABLE users ADD COLUMN IF NOT EXISTS company_address TEXT;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS license_number VARCHAR(100);
         ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS alert_email VARCHAR(255);
 
         -- Enterprise user columns
         ALTER TABLE users ADD COLUMN IF NOT EXISTS company_id UUID REFERENCES companies(id) ON DELETE SET NULL;
@@ -2361,12 +2369,7 @@ async function runDailyAlertScan() {
           }
         }
 
-        if (comp.pref_whatsapp && comp.whatsapp_number) {
-          const alertSummaryText = `⚠️ *Daily Alerts Summary for ${comp.name}*:\n- Out of stock/Low stock: ${lowStockCount}\n- Expired: ${expiredCount}\nTotal active alert items: ${activeAlerts.length}`;
-          sendWhatsAppNotification(comp.whatsapp_number, alertSummaryText).catch(e => 
-            console.error('WhatsApp daily alert error:', e.message)
-          );
-        }
+
       }
     }
 
@@ -2460,12 +2463,7 @@ async function runDailyAlertScan() {
           }
         }
 
-        if (user.pref_whatsapp && user.whatsapp_number) {
-          const alertSummaryText = `⚠️ *Daily Alerts Summary*:\n- Out of stock/Low stock: ${lowStockCount}\n- Expired: ${expiredCount}`;
-          sendWhatsAppNotification(user.whatsapp_number, alertSummaryText).catch(e => 
-            console.error('WhatsApp daily alert error:', e.message)
-          );
-        }
+
       }
     }
 

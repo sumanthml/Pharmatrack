@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { User, Mail, Phone, Package, Send, Plus, Edit, Trash2, MapPin, X, Save, Building, MessageSquare } from 'lucide-react';
 import { API_BASE_URL } from '../config';
+import { showToast } from '../utils/toast';
 
 export default function Suppliers({ socket, user }) {
   const [suppliers, setSuppliers] = useState([]);
@@ -85,7 +86,7 @@ export default function Suppliers({ socket, user }) {
         throw new Error('Failed to delete supplier.');
       }
     } catch (err) {
-      alert(`Error deleting supplier: ${err.message}`);
+      showToast(`Error deleting supplier: ${err.message}`, 'error');
     }
   };
 
@@ -236,18 +237,6 @@ export default function Suppliers({ socket, user }) {
                     style={{ width: '100%', gap: '0.4rem', justifyContent: 'center' }}
                   >
                     <Send size={13} /> Send Email Catalog
-                  </a>
-                )}
-                
-                {sup.phone && (
-                  <a 
-                    href={`https://wa.me/${sup.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${sup.name}, this is the pharmacy team inquiring about your product catalog.`)}`} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className="btn btn-secondary" 
-                    style={{ width: '100%', gap: '0.4rem', justifyContent: 'center', color: '#25D366', borderColor: 'rgba(37,211,102,0.3)' }}
-                  >
-                    <MessageSquare size={13} /> WhatsApp Chat
                   </a>
                 )}
               </div>

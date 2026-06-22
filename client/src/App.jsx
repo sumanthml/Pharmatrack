@@ -12,6 +12,7 @@ import Alerts from './components/Alerts';
 import Profile from './components/Profile';
 import AIChat from './components/AIChat';
 import Login from './components/Login';
+import Toast from './components/Toast';
 import { Activity } from 'lucide-react';
 import { API_BASE_URL } from './config';
 
@@ -27,6 +28,9 @@ export default function App() {
     logo_url: '',
     theme_color: '#0ea5e9'
   });
+  const [dbStatus, setDbStatus] = useState('loading');
+  const [isUnverifiedEmployee, setIsUnverifiedEmployee] = useState(false);
+  const [unverifiedDetails, setUnverifiedDetails] = useState(null);
 
   const fetchCompanyBranding = async () => {
     try {
@@ -90,18 +94,88 @@ export default function App() {
     };
   }, []);
 
+  const checkDbHealth = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/health`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.database === 'connected') {
+          setDbStatus('connected');
+          return;
+        }
+      }
+      setDbStatus('offline');
+    } catch (err) {
+      setDbStatus('offline');
+    }
+  };
+
+  useEffect(() => {
+    checkDbHealth();
+    const interval = setInterval(checkDbHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const checkVerificationStatus = async (firebaseUser) => {
+    if (!firebaseUser) {
+      setIsUnverifiedEmployee(false);
+      setUnverifiedDetails(null);
+      setUser(null);
+      setAuthLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/users/profile/${firebaseUser.uid}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.company_id && data.role !== 'admin' && !data.is_verified) {
+          setIsUnverifiedEmployee(true);
+          setUnverifiedDetails({
+            name: data.name,
+            role: data.role,
+            companyName: data.company_name || 'Your Registered Organization',
+            email: data.email
+          });
+          setUser(firebaseUser);
+        } else {
+          setIsUnverifiedEmployee(false);
+          setUnverifiedDetails(null);
+          setUser(firebaseUser);
+        }
+      } else {
+        // Fallback
+        setIsUnverifiedEmployee(false);
+        setUser(firebaseUser);
+      }
+    } catch (err) {
+      console.error('Error checking verification status:', err.message);
+      setIsUnverifiedEmployee(false);
+      setUser(firebaseUser);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   useEffect(() => {
     // Monitor Auth State
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setAuthLoading(false);
+      if (firebaseUser) {
+        setAuthLoading(true);
+        checkVerificationStatus(firebaseUser);
+      } else {
+        setUser(null);
+        setIsUnverifiedEmployee(false);
+        setUnverifiedDetails(null);
+        setAuthLoading(false);
+      }
     });
 
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (user) {
+    if (user && !isUnverifiedEmployee) {
       // Connect socket when user is logged in
       const newSocket = io(API_BASE_URL);
       
@@ -130,7 +204,7 @@ export default function App() {
     } else {
       setSocket(null);
     }
-  }, [user]);
+  }, [user, isUnverifiedEmployee]);
 
   if (authLoading) {
     return (
@@ -152,13 +226,97 @@ export default function App() {
 
   // Gateway check
   if (!user) {
-    return <Login onAuthSuccess={(usr) => setUser(usr)} />;
+    return <Login onAuthSuccess={(usr) => checkVerificationStatus(usr)} />;
+  }
+
+  // Block dashboard access if unverified employee
+  if (isUnverifiedEmployee) {
+    return (
+      <div style={{
+        height: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#020617',
+        color: 'white',
+        padding: '1.5rem'
+      }}>
+        <div className="glass-card modal-content" style={{
+          maxWidth: '480px',
+          width: '100%',
+          padding: '2.5rem 2rem',
+          border: '1px solid rgba(234, 179, 8, 0.3)',
+          textAlign: 'center'
+        }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            background: 'rgba(234, 179, 8, 0.15)',
+            color: '#eab308',
+            marginBottom: '1.5rem',
+            border: '1px solid rgba(234, 179, 8, 0.3)'
+          }}>
+            <Activity size={32} style={{ animation: 'pulse 2s infinite' }} />
+          </div>
+          
+          <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#eab308', marginBottom: '0.75rem' }}>
+            Awaiting Admin Approval
+          </h2>
+          
+          <p style={{ color: 'var(--text)', fontSize: '0.95rem', lineHeight: '1.6', marginBottom: '1.5rem' }}>
+            Welcome, <strong>{unverifiedDetails?.name || 'Employee'}</strong>!<br/>
+            Your request to join <strong>{unverifiedDetails?.companyName}</strong> as a <strong>{unverifiedDetails?.role}</strong> is pending administrator verification.
+          </p>
+
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+            borderRadius: '8px',
+            padding: '1rem',
+            fontSize: '0.8rem',
+            color: 'var(--text-muted)',
+            textAlign: 'left',
+            marginBottom: '1.75rem',
+            lineHeight: '1.5'
+          }}>
+            📧 <strong>Next Steps:</strong> An email notification has been dispatched to your company administrator. Please contact your manager to approve your request in their <strong>Workspace Team Registry</strong> panel.
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <button
+              onClick={() => checkVerificationStatus(auth.currentUser)}
+              className="btn btn-primary"
+              style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', fontWeight: 600 }}
+            >
+              🔄 Check Verification Status
+            </button>
+            
+            <button
+              onClick={async () => {
+                await auth.signOut();
+                setUser(null);
+                setIsUnverifiedEmployee(false);
+                setUnverifiedDetails(null);
+              }}
+              className="btn btn-secondary"
+              style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', fontWeight: 600, color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.2)' }}
+            >
+              Log Out & Sign In to Another Account
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="app-container">
       {/* Sidebar Navigation */}
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} alertsCount={alertsCount} branding={branding} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} alertsCount={alertsCount} branding={branding} dbStatus={dbStatus} />
 
       {/* Main Layout Area */}
       <main className="main-content">
@@ -203,6 +361,9 @@ export default function App() {
 
       {/* Floating AI Assistant Chatbot */}
       <AIChat user={user} />
+      
+      {/* Premium Notification Toast System */}
+      <Toast />
     </div>
   );
 }
