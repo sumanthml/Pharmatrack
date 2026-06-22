@@ -29,6 +29,7 @@ export default function Login({ onAuthSuccess }) {
   const [otpCode, setOtpCode] = useState('');
   const [otpTargetMobile, setOtpTargetMobile] = useState('');
   const [otpError, setOtpError] = useState('');
+  const [otpWarning, setOtpWarning] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [isMobileVerified, setIsMobileVerified] = useState(false);
   const [pendingFormSubmit, setPendingFormSubmit] = useState(null);
@@ -42,6 +43,7 @@ export default function Login({ onAuthSuccess }) {
     setOtpTargetMobile(targetEmail);
     setOtpCode('');
     setOtpError('');
+    setOtpWarning('');
     setShowOtpModal(true);
     setOtpLoading(true);
     setPendingFormSubmit(() => callback);
@@ -53,10 +55,15 @@ export default function Login({ onAuthSuccess }) {
         body: JSON.stringify({ email: targetEmail })
       });
 
+      const data = await res.json();
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to dispatch verification code.');
+        throw new Error(data.error || 'Failed to dispatch verification code.');
       }
+
+      if (data.warning) {
+        setOtpWarning(data.warning);
+      }
+
       // Play audio cue
       playScanBeep();
     } catch (err) {
@@ -105,6 +112,7 @@ export default function Login({ onAuthSuccess }) {
   const handleResendOtp = async () => {
     setOtpCode('');
     setOtpError('');
+    setOtpWarning('');
     setOtpLoading(true);
 
     try {
@@ -114,10 +122,15 @@ export default function Login({ onAuthSuccess }) {
         body: JSON.stringify({ email: otpTargetMobile })
       });
 
+      const data = await res.json();
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to dispatch verification code.');
+        throw new Error(data.error || 'Failed to dispatch verification code.');
       }
+
+      if (data.warning) {
+        setOtpWarning(data.warning);
+      }
+
       // Play audio cue
       playScanBeep();
     } catch (err) {
@@ -528,6 +541,12 @@ export default function Login({ onAuthSuccess }) {
             {otpError && (
               <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#fca5a5', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '0.5rem', borderRadius: '6px', fontSize: '0.75rem', marginBottom: '1rem' }}>
                 {otpError}
+              </div>
+            )}
+
+            {otpWarning && (
+              <div style={{ background: 'rgba(14, 165, 233, 0.15)', color: '#bae6fd', border: '1px solid rgba(14, 165, 233, 0.3)', padding: '0.5rem', borderRadius: '6px', fontSize: '0.75rem', marginBottom: '1rem', lineHeight: 1.4 }}>
+                {otpWarning}
               </div>
             )}
 

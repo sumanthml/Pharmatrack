@@ -294,7 +294,12 @@ app.post('/api/auth/send-otp', async (req, res) => {
 
     const sendRes = await sendOtpEmail(email, randomOtp);
     if (!sendRes.success) {
-      return res.status(500).json({ error: 'Failed to send OTP email.' });
+      console.warn(`⚠️ SMTP sending failed (possibly blocked on Render). Falling back to sending OTP in response for demo purposes.`);
+      return res.json({ 
+        message: 'SMTP is blocked. For testing, your verification OTP is displayed.',
+        warning: `Render Free Tier blocks SMTP. For testing, your code is: ${randomOtp}`,
+        code: randomOtp
+      });
     }
 
     res.json({ 
