@@ -23,9 +23,16 @@ dotenv.config();
 // Initialize Firebase Admin SDK
 let firebaseAdminActive = false;
 try {
-  const serviceAccount = JSON.parse(
-    await readFile(new URL('../serviceAccountKey.json', import.meta.url))
-  );
+  let serviceAccount;
+  try {
+    serviceAccount = JSON.parse(
+      await readFile(new URL('../serviceAccountKey.json', import.meta.url))
+    );
+  } catch (readErr) {
+    serviceAccount = JSON.parse(
+      await readFile(new URL('./serviceAccountKey.json', import.meta.url))
+    );
+  }
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
