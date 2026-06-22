@@ -2,30 +2,31 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY || 're_7uCsugqK_BUSWKY7qZhdaccxKU9VSs3ED';
+const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
 
 /**
- * Send an email via the Resend HTTP API.
+ * Send an email via the Brevo HTTP API.
  */
-async function sendMailViaResend(recipientEmail, subject, html) {
+async function sendMailViaBrevo(recipientEmail, subject, html) {
   try {
-    if (!RESEND_API_KEY) {
-      console.error('❌ Resend API key is not configured.');
+    if (!BREVO_API_KEY) {
+      console.error('❌ Brevo API key is not configured.');
       return { success: false };
     }
 
     const payload = {
-      from: 'PharmaTrack <onboarding@resend.dev>',
-      to: recipientEmail,
+      sender: { name: 'PharmaTrack', email: 'studyflow820@gmail.com' },
+      to: [{ email: recipientEmail }],
       subject: subject,
-      html: html
+      htmlContent: html
     };
 
-    const response = await fetch('https://api.resend.com/emails', {
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json'
+        'api-key': BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       },
       body: JSON.stringify(payload)
     });
@@ -33,45 +34,14 @@ async function sendMailViaResend(recipientEmail, subject, html) {
     const data = await response.json();
 
     if (!response.ok) {
-      // Handle sandbox validation error
-      if (data.name === 'validation_error') {
-        console.warn(`⚠️ Resend Sandbox Warning: redirecting email for ${recipientEmail} to verified sandbox address (studyflow820@gmail.com)`);
-        const fallbackPayload = {
-          from: 'PharmaTrack <onboarding@resend.dev>',
-          to: 'studyflow820@gmail.com',
-          subject: `[FORWARDED for ${recipientEmail}] - ${subject}`,
-          html: `<div style="background: #fff8e1; border: 1px solid #ffe082; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-family: sans-serif; font-size: 0.85rem; color: #b78103;">
-            <strong>Resend Sandbox Notice:</strong> This email was originally sent to <strong>${recipientEmail}</strong> but has been forwarded to you because your Resend API Key is in Sandbox mode and only allows sending to your registered owner address.
-          </div>${html}`
-        };
-
-        const fallbackResponse = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${RESEND_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(fallbackPayload)
-        });
-
-        const fallbackData = await fallbackResponse.json();
-        if (fallbackResponse.ok) {
-          console.log(`✅ Sandbox fallback email sent successfully. ID: ${fallbackData.id}`);
-          return { success: true };
-        } else {
-          console.error('❌ Resend Sandbox fallback failed:', fallbackData);
-          return { success: false };
-        }
-      }
-
-      console.error('❌ Resend API request failed:', data);
+      console.error('❌ Brevo API request failed:', data);
       return { success: false };
     }
 
-    console.log(`✅ Resend email sent successfully to ${recipientEmail}. ID: ${data.id}`);
+    console.log(`✅ Brevo email sent successfully to ${recipientEmail}. Message ID: ${data.messageId}`);
     return { success: true };
   } catch (err) {
-    console.error('❌ Error sending mail via Resend:', err.message);
+    console.error('❌ Error sending mail via Brevo:', err.message);
     return { success: false };
   }
 }
@@ -199,7 +169,7 @@ export async function sendAlertEmail(recipientEmail, stats, alertsList) {
 </html>
     `;
 
-    return await sendMailViaResend(
+    return await sendMailViaBrevo(
       recipientEmail, 
       `🚨 PharmaTrack System Alert Report - ${new Date().toLocaleDateString()}`, 
       htmlContent
@@ -235,7 +205,7 @@ export async function sendCompanyPasskeyEmail(recipientEmail, companyName, passk
         </div>
       </div>
     `;
-    return await sendMailViaResend(
+    return await sendMailViaBrevo(
       recipientEmail,
       `🏢 Company Registered & Passkey Generated: ${companyName}`,
       htmlContent
@@ -267,7 +237,7 @@ export async function sendEmployeeVerificationEmail(employeeEmail, employeeName)
         </div>
       </div>
     `;
-    return await sendMailViaResend(
+    return await sendMailViaBrevo(
       employeeEmail,
       `✅ Welcome to ScanTrace, ${employeeName}!`,
       htmlContent
@@ -304,7 +274,7 @@ export async function sendAdminNewEmployeeNotificationEmail(adminEmail, employee
         </div>
       </div>
     `;
-    return await sendMailViaResend(
+    return await sendMailViaBrevo(
       adminEmail,
       `🔔 New Personnel Registered: ${employeeName}`,
       htmlContent
@@ -339,7 +309,7 @@ export async function sendOtpEmail(recipientEmail, otpCode) {
         </div>
       </div>
     `;
-    return await sendMailViaResend(
+    return await sendMailViaBrevo(
       recipientEmail,
       `🔑 PharmaTrack Verification Code: ${otpCode}`,
       htmlContent
