@@ -14,8 +14,10 @@ async function sendMailViaBrevo(recipientEmail, subject, html) {
       return { success: false };
     }
 
+    const senderEmail = process.env.BREVO_SENDER_EMAIL || 'studyflow820@gmail.com';
+    const senderName = process.env.BREVO_SENDER_NAME || 'PharmaTrack';
     const payload = {
-      sender: { name: 'PharmaTrack', email: 'studyflow820@gmail.com' },
+      sender: { name: senderName, email: senderEmail },
       to: [{ email: recipientEmail }],
       subject: subject,
       htmlContent: html
