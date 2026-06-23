@@ -17,5 +17,7 @@ services:
         sync: false
       - key: BREVO_API_KEY
         sync: false
+      - key: APPS_SCRIPT_URL
+        sync: false
       - key: GOOGLE_APPLICATION_CREDENTIALS
         value: ../serviceAccountKey.json
