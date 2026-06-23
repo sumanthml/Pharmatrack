@@ -3,6 +3,67 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || '';
+
+/**
+ * Send an email via Google Apps Script Web App.
+ */
+async function sendMailViaAppsScript(recipientEmail, subject, html) {
+  try {
+    if (!APPS_SCRIPT_URL) {
+      console.error('❌ Apps Script URL is not configured.');
+      return { success: false };
+    }
+
+    const payload = {
+      to: recipientEmail,
+      subject: subject,
+      html: html
+    };
+
+    const response = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      if (text.includes('"success":true') || text.includes('success')) {
+        data = { success: true };
+      } else {
+        throw new Error('Invalid response from Apps Script');
+      }
+    }
+
+    if (!response.ok || (data && data.success === false)) {
+      console.error('❌ Apps Script API request failed:', data || text);
+      return { success: false };
+    }
+
+    console.log(`✅ Google Apps Script email sent successfully to ${recipientEmail}.`);
+    return { success: true };
+  } catch (err) {
+    console.error('❌ Error sending mail via Google Apps Script:', err.message);
+    return { success: false };
+  }
+}
+
+/**
+ * Routing function to send email via Apps Script if configured, else fallback to Brevo.
+ */
+async function sendEmail(recipientEmail, subject, html) {
+  if (APPS_SCRIPT_URL) {
+    return await sendMailViaAppsScript(recipientEmail, subject, html);
+  } else {
+    return await sendMailViaBrevo(recipientEmail, subject, html);
+  }
+}
 
 /**
  * Send an email via the Brevo HTTP API.
@@ -171,7 +232,7 @@ export async function sendAlertEmail(recipientEmail, stats, alertsList) {
 </html>
     `;
 
-    return await sendMailViaBrevo(
+    return await sendEmail(
       recipientEmail, 
       `🚨 PharmaTrack System Alert Report - ${new Date().toLocaleDateString()}`, 
       htmlContent
@@ -207,7 +268,7 @@ export async function sendCompanyPasskeyEmail(recipientEmail, companyName, passk
         </div>
       </div>
     `;
-    return await sendMailViaBrevo(
+    return await sendEmail(
       recipientEmail,
       `🏢 Company Registered & Passkey Generated: ${companyName}`,
       htmlContent
@@ -239,7 +300,7 @@ export async function sendEmployeeVerificationEmail(employeeEmail, employeeName)
         </div>
       </div>
     `;
-    return await sendMailViaBrevo(
+    return await sendEmail(
       employeeEmail,
       `✅ Welcome to ScanTrace, ${employeeName}!`,
       htmlContent
@@ -276,7 +337,7 @@ export async function sendAdminNewEmployeeNotificationEmail(adminEmail, employee
         </div>
       </div>
     `;
-    return await sendMailViaBrevo(
+    return await sendEmail(
       adminEmail,
       `🔔 New Personnel Registered: ${employeeName}`,
       htmlContent
@@ -311,7 +372,7 @@ export async function sendOtpEmail(recipientEmail, otpCode) {
         </div>
       </div>
     `;
-    return await sendMailViaBrevo(
+    return await sendEmail(
       recipientEmail,
       `🔑 PharmaTrack Verification Code: ${otpCode}`,
       htmlContent
